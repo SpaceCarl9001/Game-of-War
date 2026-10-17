@@ -1,6 +1,8 @@
 # Game of War: Strategy Board Game
 
-A hidden-rank strategy board game on a 10×10 field, in the style of Game of the Generals (Salpakan), with a few twists: barricades, a one-shot air strike, 12 roaming power-ups and 2 hidden land mines.
+A 2D hidden-rank war strategy board game on a 10×10 field, in the style of Game of the Generals (Salpakan), with a few twists: barricades, a one-shot air strike, 12 roaming power-ups and 2 hidden land mines.
+
+**Play it:** https://spacecarl9001.github.io/Game-of-War/
 
 ## Ways to play
 
@@ -10,7 +12,7 @@ A hidden-rank strategy board game on a 10×10 field, in the style of Game of the
 
 ## Install on a phone
 
-Open the game's GitHub Pages link, then:
+Open https://spacecarl9001.github.io/Game-of-War/ on your phone, then:
 
 - **Android (Chrome):** ⋮ menu → **Install app**
 - **iPhone (Safari):** Share → **Add to Home Screen**
