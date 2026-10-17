@@ -1,7 +1,7 @@
 {
-  "name": "Game of the Generals",
-  "short_name": "Generals",
-  "description": "Game of the Generals on a 10×10 field with barricades, air strikes, power-ups and hidden land mines.",
+  "name": "Game of War: Strategy Board Game",
+  "short_name": "Game of War",
+  "description": "A hidden-rank strategy board game on a 10×10 field with barricades, air strikes, power-ups and hidden land mines. Play friends online or bots offline.",
   "id": "./",
   "start_url": "./",
   "scope": "./",

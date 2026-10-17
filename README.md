@@ -1,15 +1,25 @@
-# Game of the Generals
+# Game of War: Strategy Board Game
 
-Salpakan on a 10×10 field, with a few twists: barricades, a one-shot air strike, 12 roaming power-ups and 2 hidden land mines. Play the computer, or pass one phone between two players.
+A hidden-rank strategy board game on a 10×10 field, in the style of Game of the Generals (Salpakan), with a few twists: barricades, a one-shot air strike, 12 roaming power-ups and 2 hidden land mines.
 
-## Play and install
+## Ways to play
 
-Open the game's GitHub Pages link on your phone, then:
+- **Online with a friend:** one player taps **Create online game** and shares the room code or invite link; the other taps **Join online game** (or just opens the link). Both deploy at the same time on a shared 90-second clock.
+- **Against the computer:** works offline.
+- **Pass and play:** two players on one phone, with a hand-off screen between turns. Works offline.
+
+## Install on a phone
+
+Open the game's GitHub Pages link, then:
 
 - **Android (Chrome):** ⋮ menu → **Install app**
 - **iPhone (Safari):** Share → **Add to Home Screen**
 
-It runs full screen with its own icon, works offline after the first load, and saves a game in progress if the phone closes the app.
+It runs full screen with its own icon, works offline after the first load (online games still need internet), and saves an offline game in progress if the phone closes the app.
+
+## How online play works
+
+The two phones connect directly to each other (WebRTC). [PeerJS](https://peerjs.com)'s free public service only introduces them; the game itself does not go through a server. The player who creates the room hosts the game: their phone runs the rules and sends the guest only what the guest is allowed to see, so enemy ranks and mine positions never reach the guest's phone. If either side drops, the game pauses and the guest can reconnect with the same code while the host keeps the app open.
 
 ## Run it locally
 
@@ -21,7 +31,7 @@ Then open http://localhost:5174. Phones on the same Wi-Fi can use `http://<this 
 
 ## Files
 
-- `index.html`: the whole game (rules, board, computer opponent)
+- `index.html`: the whole game (rules, board, computer opponent, online play)
 - `manifest.webmanifest`: app name, icon and full-screen settings for installing
 - `sw.js`: offline support. Change `VERSION` whenever the game changes so installed copies update.
 - `icons/`: app icons

@@ -1,8 +1,8 @@
 {
-  "name": "game-of-the-generals",
+  "name": "game-of-war",
   "version": "1.0.0",
   "private": true,
-  "description": "Game of the Generals on a 10x10 field with barricades, air strikes, power-ups and hidden land mines. Installable offline web app.",
+  "description": "Game of War: a hidden-rank strategy board game. Play friends online or bots offline. Installable web app.",
   "scripts": {
     "start": "node serve.js"
   }

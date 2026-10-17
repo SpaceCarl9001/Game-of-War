@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Game of the Generals on a 10×10 field with barricades, air strikes, power-ups and hidden land mines.">
+<meta name="description" content="Game of War, a hidden-rank strategy board game on a 10×10 field with barricades, air strikes, power-ups and hidden land mines.">
 <meta name="theme-color" content="#161911">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Generals">
+<meta name="apple-mobile-web-app-title" content="Game of War">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<title>Game of the Generals</title>
+<title>Game of War: Strategy Board Game</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Saira+Stencil+One&display=swap">
@@ -185,6 +185,18 @@ button{font:inherit;color:inherit}
 .toast.good{border-left-color:var(--green)} .toast.bad{border-left-color:var(--red)} .toast.info{border-left-color:var(--brass)}
 @keyframes tIn{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
 
+/* Online */
+.roomcode{font:400 clamp(40px,11vw,60px)/1 var(--f-display);letter-spacing:.14em;color:var(--brass-hi);text-align:center;padding:14px 8px;border:1px dashed var(--line);border-radius:6px;user-select:all;-webkit-user-select:all;font-variant-numeric:tabular-nums}
+.join{display:flex;gap:8px;flex-wrap:wrap}
+.join input{flex:1 1 160px;min-width:0;font:400 30px/1 var(--f-display);letter-spacing:.2em;text-transform:uppercase;padding:10px 12px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:4px}
+.join input:focus{outline:2px solid var(--brass-hi);outline-offset:1px}
+.join input::placeholder{color:var(--muted);opacity:.6}
+.card p.netmsg{color:var(--ink)}
+.netline{display:flex;align-items:center;gap:8px;font:500 13px var(--f-mono);color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.dot.on{background:var(--green)} .dot.off{background:var(--red)}
+.code-inline{font-family:var(--f-mono);color:var(--brass-hi)}
+
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -192,7 +204,7 @@ button{font:inherit;color:inherit}
 
 <div class="shell">
   <header class="top">
-    <div class="brand"><h1>Game of the Generals</h1><span class="sub">10×10 · barricades · air strike · mines</span></div>
+    <div class="brand"><h1>Game of War</h1><span class="sub">Strategy board game · 10×10</span></div>
     <div class="status" id="status" aria-live="polite"></div>
     <button class="btn ghost" id="menuBtn" type="button">Menu &amp; rules</button>
   </header>
@@ -234,7 +246,7 @@ function freshState(mode){
     skills:[{h:2,v:2,air:1},{h:2,v:2,air:1}],barUsed:false,tool:'move',selected:null,preview:null,
     log:[],pending:[[],[]],flagPending:null,winner:null,reason:'',setupPlayer:0,ready:[false,false],
     timeLeft:SETUP_SECS,timer:null,moves:0,last:null,fx:[],puFresh:false,safe:new Set(),nextId:1,
-    busy:false,fallen:[[],[]],handoff:null};
+    busy:false,fallen:[[],[]],handoff:null,me:0};
 }
 
 /* ---------- board queries ---------- */
@@ -262,16 +274,24 @@ function hasAction(o){return S.skills[o].air>0&&alive(1-o).length>0||alive(o).so
 
 /* ---------- setup ---------- */
 function addPiece(owner,rank,x,y){S.pieces.push({id:S.nextId++,owner,rank,x,y,alive:true,moved:false})}
+// Random formation with the flag on the back row and a guard in front of it.
+// Existing pieces are repositioned (keeping their ids) so an online guest can shuffle its own army.
 function formation(owner){
-  S.pieces=S.pieces.filter(p=>p.owner!==owner);
   const back=owner===0?0:N-1, front=owner===0?1:-1;
   const fx=1+rnd(N-2);
   const guard={x:fx,y:back+front};
   const cells=[];
   homeRows(owner).forEach(y=>{for(let x=0;x<N;x++)if(!(x===fx&&y===back)&&!(x===guard.x&&y===guard.y))cells.push({x,y})});
   const spots=[guard,...shuffle(cells).slice(0,ARMY.length-2)];
-  addPiece(owner,FLAG,fx,back);
-  shuffle(ARMY.slice(1)).forEach((r,i)=>addPiece(owner,r,spots[i].x,spots[i].y));
+  const mine=S.pieces.filter(p=>p.owner===owner&&p.alive);
+  if(!mine.length){
+    addPiece(owner,FLAG,fx,back);
+    shuffle(ARMY.slice(1)).forEach((r,i)=>addPiece(owner,r,spots[i].x,spots[i].y));
+    return;
+  }
+  const flag=mine.find(p=>p.rank===FLAG);
+  if(flag){flag.x=fx;flag.y=back}
+  shuffle(mine.filter(p=>p!==flag)).forEach((p,i)=>{p.x=spots[i].x;p.y=spots[i].y});
 }
 
 function beginSetup(p){
@@ -280,18 +300,25 @@ function beginSetup(p){
   S.timer=setInterval(()=>{
     if(S.phase!=='setup')return clearInterval(S.timer);
     S.timeLeft--;
-    if(S.timeLeft<=0){toast(`Time is up. ${SIDE[p]}'s formation is locked in.`,'info');markReady(p);return}
+    if(S.timeLeft<=0){
+      if(S.mode==='online'){toast('Time is up. Both formations are locked in.','info');S.ready=[true,true];startPlay();return}
+      toast(`Time is up. ${SIDE[p]}'s formation is locked in.`,'info');markReady(p);return;
+    }
     tickClock();
   },1000);
   render();
 }
 function tickClock(){
+  if(S.mode==='online'&&NET.role==='host')send({type:'tick',t:S.timeLeft});
   const low=S.timeLeft<=15;
   const t=$('#timer');if(t){t.textContent=fmt(S.timeLeft);t.classList.toggle('low',low)}
   const h=$('#hdrClock');if(h){h.textContent=fmt(S.timeLeft);h.classList.toggle('low',low)}
 }
 function markReady(p){
-  clearInterval(S.timer);S.ready[p]=true;S.preview=null;
+  S.ready[p]=true;
+  if(p===viewer())S.preview=null;
+  if(S.mode==='online'&&!(S.ready[0]&&S.ready[1])){render();return}
+  clearInterval(S.timer);
   if(S.ready[0]&&S.ready[1])return startPlay();
   showHandoff(1-p,'setup');
 }
@@ -306,11 +333,13 @@ function setupClick(x,y){
     if(a){a.x=x;a.y=y}
     if(b){b.x=S.preview.x;b.y=S.preview.y}
     S.preview=null;
+    if(S.mode==='online'&&NET.role==='guest')sendArrange();
   }
   render();
 }
 
 function startPlay(){
+  clearInterval(S.timer);
   S.phase='play';S.turn=0;S.moves=0;S.preview=null;
   S.pieces.forEach(p=>S.safe.add(key(p.x,p.y)));
   const band=[];for(let y=3;y<=6;y++)for(let x=0;x<N;x++)band.push({x,y});
@@ -460,7 +489,7 @@ function endTurn(){
   if(!hasAction(t))return finish(1-t,`${SIDE[t]} has no legal moves left.`);
   if(S.mode==='local'){showHandoff(t,'play');return}
   render();
-  if(t===1){S.busy=true;renderStatus();renderPanel();setTimeout(aiTurn,700+rnd(500))}
+  if(S.mode==='ai'&&t===1){S.busy=true;renderStatus();renderPanel();setTimeout(aiTurn,700+rnd(500))}
 }
 
 function finish(w,reason){
@@ -543,6 +572,7 @@ function log(text,vis='all'){S.log.push({text,vis,n:S.moves+1})}
 function notify(owner,text,kind){
   log(text,owner);
   if(S.mode==='ai'){if(owner===0)toast(text,kind);return}
+  if(S.mode==='online'){if(owner===S.me)toast(text,kind);else S.pending[owner].push({text,kind});return}
   if(owner===S.turn)toast(text,kind);else S.pending[owner].push({text,kind});
 }
 function toast(text,kind='info'){
@@ -554,21 +584,27 @@ function toast(text,kind='info'){
 function fx(x,y,type){S.fx.push({x,y,type})}
 
 /* ---------- view ---------- */
-function viewer(){if(S.mode==='local')return S.phase==='setup'?S.setupPlayer:S.phase==='over'?0:S.turn;return 0}
+function viewer(){if(S.mode==='online')return S.me;if(S.mode==='local')return S.phase==='setup'?S.setupPlayer:S.phase==='over'?0:S.turn;return 0}
+function meSide(){return S.mode==='online'?S.me:S.mode==='ai'?0:(S.phase==='over'?0:S.turn)}
 function toBoard(r,c,v){return v===1?{x:N-1-c,y:r}:{x:c,y:N-1-r}}
 function toScreen(x,y,v){return v===1?{r:y,c:N-1-x}:{r:N-1-y,c:x}}
-function isHumanTurn(){return S.phase==='play'&&!S.busy&&!S.handoff&&(S.mode==='local'||S.turn===0)}
+function isHumanTurn(){
+  if(S.phase!=='play'||S.busy||S.handoff)return false;
+  if(S.mode==='online')return S.turn===S.me&&netUp();
+  return S.mode==='local'||S.turn===0;
+}
 function face(rank){
   if(isGeneral(rank))return`<span class="stars">${'★'.repeat(rank-8)}</span>`;
   if(rank===FLAG)return'<span class="flag">⚑&#xFE0E;</span>';
   return SHORT[rank];
 }
 
-function render(){renderStatus();renderBoard();renderPanel();save()}
+function render(){renderStatus();renderBoard();renderPanel();save();sync();S.fx=[];S.puFresh=false}
 
 /* ---------- save & resume (a phone may close the app mid-game) ---------- */
-const SAVE_KEY='gotg-save-v1';
+const SAVE_KEY='gow-save-v1';
 function save(){
+  if(S.mode==='online')return;
   try{
     if(S.phase==='play')localStorage.setItem(SAVE_KEY,JSON.stringify({...S,safe:[...S.safe],timer:null,fx:[]}));
     else if(S.phase==='over')localStorage.removeItem(SAVE_KEY);
@@ -584,6 +620,7 @@ function loadSave(){
 }
 function resumeSaved(){
   const o=loadSave();if(!o)return;
+  netClose();
   if(S)clearInterval(S.timer);
   S=o;closeOverlay();
   if(S.handoff)showHandoff(S.handoff.p,S.handoff.kind);
@@ -594,9 +631,14 @@ function resumeSaved(){
 function renderStatus(){
   const st=$('#status');
   if(S.phase==='menu')st.innerHTML='<span class="muted">Choose a mode to begin</span>';
-  else if(S.phase==='setup')st.innerHTML=`<span class="chip o${S.setupPlayer}"></span>${SIDE[S.setupPlayer]} deploying <span class="clock${S.timeLeft<=15?' low':''}" id="hdrClock">${fmt(S.timeLeft)}</span>`;
-  else if(S.phase==='play')st.innerHTML=`<span class="chip o${S.turn}"></span>${S.mode==='ai'?(S.turn===0?'Your move':`${SIDE[1]} is thinking`):`${SIDE[S.turn]} to move`} <span class="muted">· Turn ${S.moves+1}</span>`;
-  else st.innerHTML=`<span class="chip o${S.winner}"></span>${S.mode==='ai'?(S.winner===0?'Victory':'Defeat'):SIDE[S.winner]+' wins'}`;
+  else if(S.phase==='setup')st.innerHTML=`<span class="chip o${viewer()}"></span>${S.mode==='online'?'Both sides deploying':SIDE[S.setupPlayer]+' deploying'} <span class="clock${S.timeLeft<=15?' low':''}" id="hdrClock">${fmt(S.timeLeft)}</span>`;
+  else if(S.phase==='play'){
+    const txt=S.mode==='ai'?(S.turn===0?'Your move':`${SIDE[1]} is thinking`)
+      :S.mode==='online'?(S.turn===S.me?'Your move':`${SIDE[S.turn]} is moving`)
+      :`${SIDE[S.turn]} to move`;
+    st.innerHTML=`<span class="chip o${S.turn}"></span>${txt} <span class="muted">· Turn ${S.moves+1}</span>`;
+  }
+  else st.innerHTML=`<span class="chip o${S.winner}"></span>${S.mode==='ai'?(S.winner===0?'Victory':'Defeat'):S.mode==='online'?(S.winner===S.me?'Victory':'Defeat'):SIDE[S.winner]+' wins'}`;
 }
 
 function renderBoard(){
@@ -606,8 +648,8 @@ function renderBoard(){
   const human=isHumanTurn(),me=S.turn;
   const barMode=human&&(S.tool==='barH'||S.tool==='barV'),airMode=human&&S.tool==='air';
   const prev=barMode&&S.preview?barCells(S.preview.x,S.preview.y,S.tool,v):[];
-  const fxMap=new Map(S.fx.map(f=>[key(f.x,f.y),f.type]));S.fx=[];
-  const pop=S.puFresh;S.puFresh=false;
+  const fxMap=new Map(S.fx.map(f=>[key(f.x,f.y),f.type]));
+  const pop=S.puFresh;
   const showPU=S.phase==='play'||S.phase==='over';
   let h='';
   for(let r=0;r<N;r++){
@@ -673,24 +715,27 @@ function renderPanel(){
         <div class="eyebrow">Deployment · ${SIDE[v]}</div>
         <div class="timer${S.timeLeft<=15?' low':''}" id="timer">${fmt(S.timeLeft)}</div>
         <p>Tap one of your pieces, then tap another square in your first three rows to swap or move it. The game starts when both sides are ready or the clock runs out.</p>
-        <div class="row"><button class="btn" data-act="shuffle" type="button">Shuffle formation</button><button class="btn primary" data-act="ready" type="button">Ready</button></div>
+        <div class="row"><button class="btn" data-act="shuffle" type="button" ${S.ready[v]?'disabled':''}>Shuffle formation</button><button class="btn primary" data-act="ready" type="button" ${S.ready[v]?'disabled':''}>${S.ready[v]?'Waiting for opponent':'Ready'}</button></div>
         <div class="ready-list">
-          <div><span class="chip o${v}"></span>${SIDE[v]}<span class="no">Deploying</span></div>
-          <div><span class="chip o${other}"></span>${SIDE[other]}${S.ready[other]?`<span class="ok">Ready</span>`:'<span class="no">Waiting for their turn to deploy</span>'}</div>
+          <div><span class="chip o${v}"></span>${SIDE[v]} (you)${S.ready[v]?'<span class="ok">Ready</span>':'<span class="no">Deploying</span>'}</div>
+          <div><span class="chip o${other}"></span>${SIDE[other]}${S.ready[other]?`<span class="ok">Ready</span>`:S.mode==='online'?'<span class="no">Deploying</span>':'<span class="no">Waiting for their turn to deploy</span>'}</div>
         </div>
+        ${netLine()}
       </div>
       <div class="sec"><div class="eyebrow">Your army · 21 pieces</div><div class="roster">${roster}</div></div>`;
     return;
   }
-  const me=S.mode==='ai'?0:(S.phase==='over'?0:S.turn);
+  const me=meSide();
   const sk=S.skills[me],human=isHumanTurn();
   const canBar=human&&!S.barUsed;
   let turnTxt,turnCls='turn';
-  if(S.phase==='over'){turnTxt=S.mode==='ai'?(S.winner===0?'Victory':'Defeat'):`${SIDE[S.winner]} wins`}
-  else if(S.mode==='ai'&&S.turn===1){turnTxt=`${SIDE[1]} is moving…`;turnCls+=' wait'}
-  else turnTxt=S.mode==='ai'?'Your orders':`${SIDE[S.turn]}'s orders`;
+  if(S.phase==='over'){turnTxt=S.mode==='local'?`${SIDE[S.winner]} wins`:(S.winner===me?'Victory':'Defeat')}
+  else if((S.mode==='ai'||S.mode==='online')&&S.turn!==me){turnTxt=`${SIDE[S.turn]} is moving…`;turnCls+=' wait'}
+  else turnTxt=S.mode==='local'?`${SIDE[S.turn]}'s orders`:'Your orders';
   let hint;
   if(S.phase==='over')hint=S.reason+' All ranks and any unexploded mines are now shown.';
+  else if(S.mode==='online'&&!netUp())hint='The connection dropped. The game is paused until it comes back.';
+  else if(S.busy&&S.mode==='online'&&S.turn===me)hint='Sending your orders…';
   else if(!human)hint='Wait for the enemy to finish their turn.';
   else if(S.tool==='barH'||S.tool==='barV')hint=`Tap a highlighted square to preview, then tap it again to build. The barricade covers that square and the one ${S.tool==='barH'?'to its right':'below it'}. You still move afterwards.`;
   else if(S.tool==='air')hint='Tap an enemy piece to aim, then tap it again to fire. The strike ends your turn.';
@@ -703,6 +748,7 @@ function renderPanel(){
     <div class="sec">
       <div class="${turnCls}">${turnTxt}</div>
       <div class="counts"><span>Your pieces <b>${alive(me).length}</b></span><span>Enemy pieces <b>${alive(1-me).length}</b></span><span>Power-ups <b>${S.powerups.length}</b></span></div>
+      ${netLine()}
     </div>
     <div class="sec">
       <div class="eyebrow">Special orders</div>
@@ -734,8 +780,9 @@ function renderPanel(){
 }
 
 /* ---------- overlays ---------- */
-function overlay(html,solid){const o=$('#overlay');o.classList.toggle('solid',!!solid);$('#card').innerHTML=html;o.hidden=false;const f=o.querySelector('[data-focus]');if(f)f.focus()}
+function overlay(html,solid,kind){const o=$('#overlay');o.classList.toggle('solid',!!solid);o.dataset.kind=kind||'';$('#card').innerHTML=html;o.hidden=false;const f=o.querySelector('[data-focus]');if(f)f.focus()}
 function closeOverlay(){$('#overlay').hidden=true}
+function closeNetOverlay(){const o=$('#overlay');if(!o.hidden&&['lobby','join','lost'].includes(o.dataset.kind))closeOverlay()}
 
 const RULES=`<details class="rules"${'%OPEN%'}><summary>Rules of engagement</summary><ul>
   <li><b>Ranks</b>, high to low: 5★ to 1★ General, Colonel, Lt Colonel, Major, Captain, 1st Lt, 2nd Lt, Sergeant, Private, Flag. The <b>Spy</b> beats every rank from Sergeant up but loses to a Private. Equal ranks eliminate each other. Any piece captures a Flag.</li>
@@ -750,11 +797,19 @@ const RULES=`<details class="rules"${'%OPEN%'}><summary>Rules of engagement</sum
 
 function showMenu(){
   const inGame=S.phase==='setup'||S.phase==='play';
-  overlay(`<div class="eyebrow">Salpakan, field edition</div>
-    <h2>Game of the Generals</h2>
+  const online=navigator.onLine!==false;
+  overlay(`<div class="eyebrow">Strategy board game</div>
+    <h2>Game of War</h2>
     <p>Two hidden armies on a 10×10 field with barricades, an air strike, roaming power-ups and two buried mines.</p>
+    <div class="eyebrow">Online</div>
     <div class="modes">
-      <button class="btn mode primary" type="button" data-act="ai" data-focus><b>Play the computer</b><span>You command Ivory. Onyx deploys instantly.</span></button>
+      <button class="btn mode primary" type="button" data-act="host" data-focus ${online?'':'disabled'}><b>Create online game</b><span>Get a room code and invite a friend.</span></button>
+      <button class="btn mode" type="button" data-act="join" ${online?'':'disabled'}><b>Join online game</b><span>Enter your friend's room code.</span></button>
+    </div>
+    ${online?'':'<p>You are offline. Online games need an internet connection; the modes below work offline.</p>'}
+    <div class="eyebrow">Offline</div>
+    <div class="modes">
+      <button class="btn mode" type="button" data-act="ai"><b>Play the computer</b><span>You command Ivory against a bot. No internet needed.</span></button>
       <button class="btn mode" type="button" data-act="local"><b>Pass and play</b><span>Two players on one device, with a hand-off screen between turns.</span></button>
     </div>
     ${inGame?'<div class="row"><button class="btn" type="button" data-act="resume">Resume current game</button></div>':S.phase==='menu'&&loadSave()?'<div class="row"><button class="btn" type="button" data-act="restore">Resume saved game</button></div>':''}
@@ -772,16 +827,18 @@ function showHandoff(p,kind){
 }
 function showOver(){
   if(S.phase!=='over')return;
-  const title=S.mode==='ai'?(S.winner===0?'Victory':'Defeat'):`${SIDE[S.winner]} wins`;
+  const title=S.mode==='local'?`${SIDE[S.winner]} wins`:(S.winner===meSide()?'Victory':'Defeat');
+  const on=S.mode==='online';
   overlay(`<div class="eyebrow">Battle over · turn ${S.moves+1}</div>
     <div class="big-side"><span class="chip o${S.winner}"></span><h2>${title}</h2></div>
     <p>${S.reason}</p>
     <p>Every rank and any unexploded mine is now shown on the board.</p>
-    <div class="row"><button class="btn primary" type="button" data-act="again" data-focus>Play again</button><button class="btn" type="button" data-act="review">Review the board</button><button class="btn" type="button" data-act="menu">Main menu</button></div>`);
+    <div class="row"><button class="btn primary" type="button" data-act="again" data-focus ${on&&!netUp()?'disabled':''}>${on?'Rematch':'Play again'}</button><button class="btn" type="button" data-act="review">Review the board</button><button class="btn" type="button" data-act="${on?'leave':'menu'}">${on?'Leave game':'Main menu'}</button></div>`,false,'over');
 }
 
 /* ---------- game lifecycle ---------- */
 function newGame(mode){
+  netClose();
   if(S)clearInterval(S.timer);
   S=freshState(mode);
   formation(0);formation(1);
@@ -793,7 +850,17 @@ function newGame(mode){
 function act(a){
   switch(a){
     case'ai':case'local':newGame(a);break;
-    case'again':newGame(S.mode);break;
+    case'again':
+      if(S.mode!=='online')newGame(S.mode);
+      else if(NET.role==='host')newOnlineGame();
+      else{send({type:'rematch'});toast('Rematch requested. Starting as soon as the host gets it.','info')}
+      break;
+    case'host':hostGame();break;
+    case'join':showJoin('','');break;
+    case'rejoin':joinGame(NET.lastCode);break;
+    case'leave':leaveOnline();break;
+    case'copy':copyText(NET.code,'Room code copied.');break;
+    case'share':shareInvite();break;
     case'menu':showMenu();break;
     case'review':closeOverlay();break;
     case'restore':resumeSaved();break;
@@ -806,8 +873,16 @@ function act(a){
       if(h.kind==='setup')beginSetup(h.p);
       else{render();S.pending[h.p].forEach(r=>toast(r.text,r.kind));S.pending[h.p]=[]}
       break;}
-    case'shuffle':if(S.phase==='setup'){formation(viewer());S.preview=null;render()}break;
-    case'ready':if(S.phase==='setup')markReady(viewer());break;
+    case'shuffle':
+      if(S.phase!=='setup'||S.ready[viewer()])break;
+      formation(viewer());S.preview=null;
+      if(S.mode==='online'&&NET.role==='guest')sendArrange();
+      render();break;
+    case'ready':
+      if(S.phase!=='setup'||S.ready[viewer()])break;
+      if(S.mode==='online'&&NET.role==='guest'){sendArrange();send({type:'ready'});S.ready[S.me]=true;S.preview=null;render()}
+      else markReady(viewer());
+      break;
     case'barH':case'barV':case'air':
       if(!isHumanTurn())break;
       S.tool=S.tool===a?'move':a;S.preview=null;S.selected=null;render();break;
@@ -821,19 +896,19 @@ function playClick(x,y){
   if(S.tool==='barH'||S.tool==='barV'){
     const cells=barCells(x,y,S.tool,v);
     if(!validBar(cells)){S.preview=null;render();toast('A barricade needs two empty squares inside the board.','info');return}
-    if(S.preview&&S.preview.x===x&&S.preview.y===y){placeBarricade(me,cells,S.tool);S.tool='move';S.preview=null;render();return}
+    if(S.preview&&S.preview.x===x&&S.preview.y===y){const tool=S.tool;S.tool='move';S.preview=null;commit({type:'bar',cells,tool});return}
     S.preview={x,y};render();return;
   }
   if(S.tool==='air'){
     const t=pieceAt(x,y);
     if(!t||t.owner===me){toast('Pick an enemy piece to strike.','info');return}
-    if(S.preview&&S.preview.x===x&&S.preview.y===y){S.tool='move';S.preview=null;airStrike(me,t);endTurn();return}
+    if(S.preview&&S.preview.x===x&&S.preview.y===y){S.tool='move';S.preview=null;commit({type:'air',id:t.id});return}
     S.preview={x,y};render();return;
   }
   const p=pieceAt(x,y);
   if(S.selected){
     const sp=getPiece(S.selected);
-    if(legalMoves(sp).some(m=>m.x===x&&m.y===y)){S.selected=null;doMove(sp,x,y);endTurn();return}
+    if(legalMoves(sp).some(m=>m.x===x&&m.y===y)){S.selected=null;commit({type:'move',id:sp.id,x,y});return}
   }
   if(p&&p.owner===me&&S.selected!==p.id){
     if(!legalMoves(p).length)toast('That piece is boxed in and cannot move.','info');
@@ -862,9 +937,259 @@ $('#card').addEventListener('click',e=>{const b=e.target.closest('[data-act]');i
 $('#menuBtn').addEventListener('click',showMenu);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S.phase==='play'&&S.tool!=='move'){act('cancel')}});
 
-/* Opening view: a sample deployment behind the menu */
+/* ---------- applying orders (shared by every mode; the online host also uses it to check the guest's orders) ---------- */
+function applyAction(owner,a){
+  if(S.phase!=='play'||S.turn!==owner||!a)return false;
+  const sk=S.skills[owner];
+  if(a.type==='bar'){
+    const tool=a.tool,c=a.cells;
+    if(S.barUsed||!(tool==='barH'&&sk.h>0||tool==='barV'&&sk.v>0)||!Array.isArray(c)||c.length!==2)return false;
+    const cells=c.map(q=>({x:q&&q.x,y:q&&q.y}));
+    if(!cells.every(q=>Number.isInteger(q.x)&&Number.isInteger(q.y)))return false;
+    const dx=Math.abs(cells[1].x-cells[0].x),dy=Math.abs(cells[1].y-cells[0].y);
+    if(tool==='barH'?!(dx===1&&dy===0):!(dx===0&&dy===1))return false;
+    if(!validBar(cells))return false;
+    placeBarricade(owner,cells,tool);render();return true;
+  }
+  if(a.type==='air'){
+    const t=getPiece(a.id);
+    if(!sk.air||!t||!t.alive||t.owner===owner)return false;
+    airStrike(owner,t);endTurn();return true;
+  }
+  if(a.type==='move'){
+    const p=getPiece(a.id);
+    if(!p||!p.alive||p.owner!==owner||!legalMoves(p).some(m=>m.x===a.x&&m.y===a.y))return false;
+    doMove(p,a.x,a.y);endTurn();return true;
+  }
+  return false;
+}
+function commit(a){
+  if(S.mode==='online'&&NET.role==='guest'){S.busy=true;S.selected=null;render();send({type:'action',a});return}
+  applyAction(S.turn,a);
+}
+
+/* ---------- online play ----------
+   Phones connect directly (WebRTC through PeerJS's free broker). The host (Ivory) runs the real game and
+   sends the guest (Onyx) only what Onyx may see: enemy ranks and mine positions never leave the host. */
+const PEER_SRC='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
+const ID_PREFIX='game-of-war-';
+const CODE_CHARS='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const NET={role:null,code:null,lastCode:null};
+let peer=null,conn=null,lastSent='';
+function netUp(){return!!(conn&&conn.open)}
+function send(m){if(netUp())try{conn.send(m)}catch(e){}}
+function makeCode(){let s='';for(let i=0;i<6;i++)s+=CODE_CHARS[rnd(CODE_CHARS.length)];return s}
+function peerId(code){return ID_PREFIX+code.toLowerCase()}
+function loadPeer(){
+  if(window.Peer)return Promise.resolve();
+  return new Promise((res,rej)=>{const s=document.createElement('script');s.src=PEER_SRC;s.onload=res;s.onerror=rej;document.head.appendChild(s)});
+}
+function netClose(){
+  const c=conn,p=peer;conn=null;peer=null;NET.role=null;NET.code=null;lastSent='';
+  try{c&&c.close()}catch(e){}
+  try{p&&p.destroy()}catch(e){}
+}
+function netErrorText(e){
+  const t=e&&e.type;
+  if(t==='browser-incompatible')return'This browser does not support online play. Try Chrome or Safari.';
+  if(t==='network'||t==='server-error'||t==='socket-error'||t==='socket-closed')return'Could not reach the online service. Check your internet connection and try again.';
+  return'Could not connect'+(t?` (${t})`:'')+'. Try again.';
+}
+function netLine(){
+  if(S.mode!=='online')return'';
+  return`<div class="netline"><span class="dot ${netUp()?'on':'off'}"></span>Online as ${SIDE[S.me]}${NET.code?` · room ${NET.code}`:''}${netUp()?'':' · disconnected'}</div>`;
+}
+function inviteUrl(code){return location.origin+location.pathname+'?join='+code}
+function copyText(text,done){
+  if(!text)return;
+  const fallback=()=>toast(`Copy this: ${text}`,'info');
+  try{navigator.clipboard.writeText(text).then(()=>toast(done,'good'),fallback)}catch(e){fallback()}
+}
+function shareInvite(){
+  const url=inviteUrl(NET.code);
+  if(navigator.share)navigator.share({title:'Game of War',text:`Join my Game of War battle. Room code: ${NET.code}`,url}).catch(()=>{});
+  else copyText(url,'Invite link copied. Send it to your friend.');
+}
+
+// What one side is allowed to know.
+function viewFor(o){
+  const over=S.phase==='over';
+  const pieces=S.pieces.filter(p=>p.alive&&(p.owner===o||S.phase!=='setup'))
+    .map(p=>p.owner===o||over?{...p}:{...p,rank:null});
+  const v={mode:'online',me:o,phase:S.phase,turn:S.turn,moves:S.moves,winner:S.winner,reason:S.reason,
+    pieces,bars:S.bars,mines:over?S.mines:[],craters:S.craters,powerups:S.powerups,skills:S.skills,
+    barUsed:S.barUsed,last:S.last,flagPending:S.flagPending,ready:S.ready,timeLeft:S.timeLeft,
+    log:S.log.filter(e=>e.vis==='all'||e.vis===o),fallen:o===0?[S.fallen[0],[]]:[[],S.fallen[1]],
+    fx:S.fx,puFresh:S.puFresh,toasts:S.pending[o]};
+  return v;
+}
+function sync(force){
+  if(!S||S.mode!=='online'||NET.role!=='host'||!netUp())return;
+  const v=viewFor(1),s=JSON.stringify(v);
+  if(!force&&s===lastSent)return;
+  lastSent=s;S.pending[1]=[];
+  send({type:'state',v});
+}
+function sendArrange(){send({type:'arrange',pos:alive(S.me).map(p=>({id:p.id,x:p.x,y:p.y}))})}
+
+function attach(c,onOpen){
+  conn=c;
+  c.on('open',()=>{if(conn!==c)return;onOpen&&onOpen();onConnected()});
+  c.on('data',m=>{if(conn===c)onData(m)});
+  c.on('close',()=>{if(conn===c){conn=null;onClosed()}});
+  c.on('error',()=>{});
+}
+
+function lobbyHtml(msg){
+  return`<div class="eyebrow">Online · create</div><h2>Invite a friend</h2>
+    ${NET.code?`<p>Send this code or the invite link. The battle starts as soon as your friend joins. You play Ivory and move first.</p>
+    <div class="roomcode" aria-label="Room code">${NET.code}</div>
+    <div class="row"><button class="btn primary" type="button" data-act="share" data-focus>Share invite link</button><button class="btn" type="button" data-act="copy">Copy code</button></div>`:''}
+    <p class="netmsg">${msg}</p>
+    <div class="row"><button class="btn" type="button" data-act="leave">Cancel</button></div>`;
+}
+async function hostGame(){
+  netClose();
+  overlay(lobbyHtml('Opening a room…'),false,'lobby');
+  try{await loadPeer()}catch(e){return overlay(lobbyHtml('Could not reach the online service. Check your internet connection and try again.'),false,'lobby')}
+  const code=makeCode(),p=new window.Peer(peerId(code),{debug:0});
+  peer=p;
+  p.on('open',()=>{if(peer!==p)return;NET.role='host';NET.code=code;NET.lastCode=code;overlay(lobbyHtml('Waiting for your friend to join…'),false,'lobby')});
+  p.on('connection',c=>{
+    if(peer!==p)return;
+    if(netUp()){c.on('open',()=>{try{c.send({type:'full'})}catch(e){}setTimeout(()=>c.close(),500)});return}
+    attach(c);
+  });
+  p.on('disconnected',()=>{if(peer===p&&!p.destroyed)try{p.reconnect()}catch(e){}});
+  p.on('error',e=>{
+    if(peer!==p)return;
+    if(e.type==='unavailable-id')return hostGame();
+    if(netUp()||S.mode==='online')return; // a broker hiccup mid-game; the direct link keeps working
+    overlay(lobbyHtml(netErrorText(e)),false,'lobby');
+  });
+}
+
+function showJoin(code,msg,busy){
+  overlay(`<div class="eyebrow">Online · join</div><h2>Join a game</h2>
+    <p>Enter the 6-character room code from your friend, or open the invite link they sent.</p>
+    <form class="join" id="joinForm" autocomplete="off">
+      <input id="joinCode" name="joinCode" maxlength="6" inputmode="text" autocapitalize="characters" spellcheck="false" placeholder="CODE" value="${(code||'').replace(/[^A-Z0-9]/gi,'')}" aria-label="Room code" ${busy?'disabled':''}>
+      <button class="btn primary" type="submit" ${busy?'disabled':''}>Join</button>
+    </form>
+    <p class="netmsg">${msg||''}</p>
+    <div class="row"><button class="btn" type="button" data-act="leave">Back</button></div>`,false,'join');
+  if(!busy){const i=$('#joinCode');if(i)i.focus()}
+}
+async function joinGame(raw){
+  const code=String(raw||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(code.length!==6)return showJoin(code,'Enter the 6-character room code.');
+  netClose();
+  NET.lastCode=code;
+  showJoin(code,'Connecting…',true);
+  try{await loadPeer()}catch(e){return showJoin(code,'Could not reach the online service. Check your internet connection and try again.')}
+  const p=new window.Peer({debug:0});
+  peer=p;NET.role='guest';NET.code=code;
+  const timer=setTimeout(()=>{if(peer===p&&!netUp()){netClose();showJoin(code,'No answer from that room. Check the code, and make sure your friend still has the invite screen open.')}},20000);
+  p.on('open',()=>{if(peer!==p)return;attach(p.connect(peerId(code),{reliable:true,serialization:'json'}),()=>clearTimeout(timer))});
+  p.on('disconnected',()=>{if(peer===p&&!p.destroyed)try{p.reconnect()}catch(e){}});
+  p.on('error',e=>{
+    if(peer!==p||netUp())return;
+    clearTimeout(timer);netClose();
+    showJoin(code,e.type==='peer-unavailable'?`No open room with code ${code}. Check the code with your friend.`:netErrorText(e));
+  });
+}
+
+function onConnected(){
+  lastSent='';
+  if(NET.role==='host'){
+    if(S.mode==='online'&&(S.phase==='setup'||S.phase==='play')){closeNetOverlay();toast(`${SIDE[1]} reconnected.`,'good');render();sync(true)}
+    else newOnlineGame();
+  }else{
+    send({type:'hello'});
+    if(!(S.mode==='online'&&S.phase!=='menu'))showJoin(NET.code,'Connected. Waiting for the host to start…',true);
+  }
+}
+function onClosed(){
+  if(S.mode!=='online'){if(NET.role==='guest'){netClose();showJoin(NET.lastCode,'The connection closed before the game started. Try again.')}return}
+  render();
+  if(S.phase==='over'){toast('Your opponent left the game.','info');return}
+  if(NET.role==='host'){
+    overlay(`<div class="eyebrow">Connection lost</div><h2>${SIDE[1]} disconnected</h2>
+      <p>The game is paused. Your friend can rejoin with room code <b class="code-inline">${NET.code}</b> or the same invite link.</p>
+      <div class="row"><button class="btn" type="button" data-act="share">Share invite link again</button><button class="btn" type="button" data-act="leave">Leave game</button></div>`,false,'lost');
+  }else{
+    overlay(`<div class="eyebrow">Connection lost</div><h2>Lost the host</h2>
+      <p>The host may have closed the app or lost signal. The game continues where it stopped if they still have it open.</p>
+      <div class="row"><button class="btn primary" type="button" data-act="rejoin" data-focus>Reconnect</button><button class="btn" type="button" data-act="leave">Leave game</button></div>`,false,'lost');
+  }
+}
+function onData(m){
+  if(!m||typeof m!=='object')return;
+  if(NET.role==='host'){
+    if(S.mode!=='online')return;
+    if(m.type==='action'){if(!applyAction(1,m.a))sync(true)}
+    else if(m.type==='arrange')hostArrange(m.pos);
+    else if(m.type==='ready'){if(S.phase==='setup'&&!S.ready[1])markReady(1)}
+    else if(m.type==='rematch'){if(S.phase==='over'){toast(`${SIDE[1]} started a rematch.`,'info');newOnlineGame()}}
+    else if(m.type==='hello')sync(true);
+  }else{
+    if(m.type==='state')guestState(m.v);
+    else if(m.type==='tick'){if(S.mode==='online'&&S.phase==='setup'){S.timeLeft=m.t;tickClock()}}
+    else if(m.type==='full'){netClose();showJoin(NET.lastCode,'That game already has two players.')}
+  }
+}
+function hostArrange(pos){
+  if(S.phase!=='setup'||S.ready[1]||!Array.isArray(pos))return;
+  const mine=alive(1);if(pos.length!==mine.length)return;
+  const seen=new Set();
+  for(const q of pos){
+    const p=q&&getPiece(q.id);
+    if(!p||p.owner!==1||!Number.isInteger(q.x)||q.x<0||q.x>=N||!homeRows(1).includes(q.y)||seen.has(key(q.x,q.y)))return;
+    seen.add(key(q.x,q.y));
+  }
+  pos.forEach(q=>{const p=getPiece(q.id);p.x=q.x;p.y=q.y});
+}
+function newOnlineGame(){
+  if(S)clearInterval(S.timer);
+  S=freshState('online');S.me=0;
+  formation(0);formation(1);
+  closeOverlay();
+  beginSetup(0);
+  toast(`${SIDE[1]} joined. Deploy your army; you share one 90-second clock.`,'good');
+}
+function guestState(v){
+  const prev=S;
+  const wasOnline=prev&&prev.mode==='online';
+  const next={...freshState('online'),...v,busy:false,timer:null};
+  if(wasOnline&&prev.phase===v.phase&&prev.turn===v.turn&&prev.moves===v.moves){next.selected=prev.selected;next.tool=prev.tool;next.preview=prev.preview}
+  if(wasOnline&&prev.phase==='setup'&&v.phase==='setup'){next.pieces=prev.pieces;next.ready=[v.ready[0],prev.ready[1]||v.ready[1]]}
+  S=next;
+  closeNetOverlay();
+  if(!wasOnline||prev.phase!==v.phase){
+    if(v.phase==='setup'){closeOverlay();toast('You play Onyx. Deploy your army; you share one 90-second clock.','info')}
+    else if(v.phase==='play'){closeOverlay();toast(`Battle begins. ${SIDE[0]} moves first.`,'info')}
+    else if(v.phase==='over')setTimeout(showOver,1000);
+  }
+  (v.toasts||[]).forEach(t=>toast(t.text,t.kind));
+  render();
+}
+function leaveOnline(){
+  netClose();
+  if(S.mode!=='online'){showMenu();return}
+  clearInterval(S.timer);
+  S=freshState('ai');formation(0);formation(1);S.phase='menu';
+  render();showMenu();
+}
+
+$('#card').addEventListener('submit',e=>{e.preventDefault();if(e.target.id==='joinForm')joinGame($('#joinCode').value)});
+$('#card').addEventListener('input',e=>{if(e.target.id==='joinCode')e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'')});
+
+/* Opening view: a sample deployment behind the menu, or straight into a join from an invite link */
 S=freshState('ai');formation(0);formation(1);
-render();showMenu();
+render();
+const invite=new URLSearchParams(location.search).get('join');
+if(invite){history.replaceState(null,'',location.pathname);joinGame(invite)}
+else showMenu();
 })();
 </script>
 <script>
