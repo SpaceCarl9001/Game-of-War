@@ -1,0 +1,9 @@
+{
+  "name": "game-of-the-generals",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Game of the Generals on a 10x10 field with barricades, air strikes, power-ups and hidden land mines. Installable offline web app.",
+  "scripts": {
+    "start": "node serve.js"
+  }
+}
