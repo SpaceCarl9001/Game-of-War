@@ -33,7 +33,7 @@ body{margin:0;overscroll-behavior:none}
   --frame:#241f15; --frame-hi:#4a3d22;
   --ivory:#f1e8cc; --ivory-ink:#2b2a20; --ivory-edge:#c4963a;
   --onyx:#1e2a34; --onyx-ink:#e6eff5; --onyx-edge:#5f9cc4;
-  --steel:#82b6da; --ember:#ff6a2b; --flame:#ffc23d; --teal:#5cc2a8;
+  --steel:#82b6da; --cyan:#38e1ff; --ember:#ff6a2b; --flame:#ffc23d; --teal:#5cc2a8;
   --red:#ec5b3b; --green:#9fd06a; --scrim:rgba(8,12,7,.76);
   --f-display:"Saira Stencil One",Impact,"Arial Black",sans-serif;
   --f-ui:"Barlow Condensed","Arial Narrow","Roboto Condensed",system-ui,sans-serif;
@@ -63,6 +63,11 @@ button{font:inherit;color:inherit}
 .clock{font:500 15px var(--f-mono);font-variant-numeric:tabular-nums;color:var(--brass-hi);padding:2px 8px;border:1px solid var(--line);border-radius:4px}
 .clock.low{color:var(--ember);border-color:var(--ember)}
 
+.top-actions{display:flex;gap:8px;align-items:center}
+.btn.icon{padding:8px 10px;display:grid;place-items:center}
+#soundBtn .cross{display:none}
+#soundBtn.off{color:var(--muted)} #soundBtn.off .wave{display:none} #soundBtn.off .cross{display:inline}
+
 /* Main grid */
 .app{display:grid;grid-template-columns:1fr;gap:16px;align-items:start}
 @media (min-width:860px){.app{grid-template-columns:auto 320px}}
@@ -91,8 +96,15 @@ button{font:inherit;color:inherit}
 .sq.z1{background-image:linear-gradient(rgba(110,170,215,.08),rgba(110,170,215,.08)),radial-gradient(circle at 30% 22%,rgba(255,255,255,.07),transparent 62%)}
 .sq:focus-visible{outline:2px solid var(--brass-hi);outline-offset:-2px;z-index:3}
 .sq.zone{box-shadow:inset 0 0 0 999px rgba(217,168,66,.16)}
-.sq.lf{box-shadow:inset 0 0 0 2px rgba(246,210,124,.35)}
-.sq.lt{box-shadow:inset 0 0 0 2px var(--brass)}
+/* Last move: cyan for the enemy's, quiet white for your own; the arrow on the square it left points to where it went */
+.sq.lf.foe{box-shadow:inset 0 0 0 999px rgba(56,225,255,.13),inset 0 0 0 2px rgba(56,225,255,.55)}
+.sq.lt.foe{box-shadow:inset 0 0 0 3px var(--cyan),inset 0 0 16px rgba(56,225,255,.6);animation:lastGlow 1.3s ease-in-out infinite alternate}
+.sq.lf.mine{box-shadow:inset 0 0 0 2px rgba(255,255,255,.22)}
+.sq.lt.mine{box-shadow:inset 0 0 0 2px rgba(255,255,255,.6)}
+@keyframes lastGlow{to{box-shadow:inset 0 0 0 3px var(--cyan),inset 0 0 26px rgba(56,225,255,.85)}}
+.mk.trail{inset:34%;z-index:3;border-top:3px solid;border-right:3px solid;border-radius:2px;transform:rotate(calc(var(--rot) + 45deg));opacity:.9}
+.lf.foe .mk.trail{color:var(--cyan);filter:drop-shadow(0 0 4px rgba(56,225,255,.8))}
+.lf.mine .mk.trail{color:rgba(255,255,255,.55)}
 .sq.can{box-shadow:inset 0 0 0 999px rgba(246,210,124,.10)}
 .sq.prev,.sq.hov{box-shadow:inset 0 0 0 999px rgba(246,210,124,.5)}
 .sq.atk{box-shadow:inset 0 0 0 3px var(--ember);animation:atk .8s ease-in-out infinite alternate}
@@ -200,6 +212,8 @@ button{font:inherit;color:inherit}
 .legend div{display:flex;align-items:center;gap:8px}
 .lg{width:22px;height:22px;position:relative;border-radius:3px;background:var(--sq-a);flex:none;--cell:22px}
 .lg .bag,.lg .crater{position:absolute}
+.lg.lastfoe{box-shadow:inset 0 0 0 2px var(--cyan),inset 0 0 8px rgba(56,225,255,.6)}
+.lg.lastme{box-shadow:inset 0 0 0 2px rgba(255,255,255,.6)}
 .lg.band{background-color:var(--mud-a);background-image:repeating-linear-gradient(135deg,rgba(60,30,10,.25) 0 2px,transparent 2px 6px)}
 .fallen{display:flex;flex-wrap:wrap;gap:4px}
 .fallen span{font:600 12px var(--f-ui);padding:2px 6px;border-radius:3px;background:var(--panel-2);color:var(--muted);letter-spacing:.04em}
@@ -254,7 +268,12 @@ button{font:inherit;color:inherit}
   <header class="top">
     <div class="brand"><h1>Game of <span class="war">War</span></h1><span class="sub">Strategy board game · 10×10</span></div>
     <div class="status" id="status" aria-live="polite"></div>
-    <button class="btn ghost" id="menuBtn" type="button">Menu &amp; rules</button>
+    <div class="top-actions">
+      <button class="btn ghost icon" id="soundBtn" type="button" aria-pressed="true" aria-label="Sound on" title="Sound on or off">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path class="wave" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/><path class="cross" d="M16.5 9.5l5 5M21.5 9.5l-5 5"/></svg>
+      </button>
+      <button class="btn ghost" id="menuBtn" type="button">Menu &amp; rules</button>
+    </div>
   </header>
   <main class="app">
     <section class="board-wrap" id="boardWrap"><div class="board" id="board" role="grid" aria-label="Game board"></div><canvas id="fxc" aria-hidden="true"></canvas></section>
@@ -294,7 +313,7 @@ function freshState(mode){
     skills:[{h:2,v:2,air:1},{h:2,v:2,air:1}],barUsed:false,tool:'move',selected:null,preview:null,
     log:[],pending:[[],[]],flagPending:null,winner:null,reason:'',setupPlayer:0,ready:[false,false],
     timeLeft:SETUP_SECS,timer:null,moves:0,last:null,fx:[],puFresh:false,safe:new Set(),nextId:1,
-    busy:false,fallen:[[],[]],handoff:null,me:0};
+    busy:false,fallen:[[],[]],handoff:null,me:0,sfx:[]};
 }
 
 /* ---------- board queries ---------- */
@@ -358,6 +377,7 @@ function beginSetup(p){
 }
 function tickClock(){
   if(S.mode==='online'&&NET.role==='host')send({type:'tick',t:S.timeLeft});
+  if(S.timeLeft>0&&S.timeLeft<=10)snd('tick');
   const low=S.timeLeft<=15;
   const t=$('#timer');if(t){t.textContent=fmt(S.timeLeft);t.classList.toggle('low',low)}
   const h=$('#hdrClock');if(h){h.textContent=fmt(S.timeLeft);h.classList.toggle('low',low)}
@@ -374,13 +394,13 @@ function setupClick(x,y){
   const v=viewer();
   if(S.ready[v])return;
   if(!homeRows(v).includes(y)){S.preview=null;render();return}
-  if(!S.preview){if(pieceAt(x,y))S.preview={x,y}}
+  if(!S.preview){if(pieceAt(x,y)){S.preview={x,y};snd('select')}}
   else if(S.preview.x===x&&S.preview.y===y)S.preview=null;
   else{
     const a=pieceAt(S.preview.x,S.preview.y),b=pieceAt(x,y);
     if(a){a.x=x;a.y=y}
     if(b){b.x=S.preview.x;b.y=S.preview.y}
-    S.preview=null;
+    S.preview=null;snd('move');
     if(S.mode==='online'&&NET.role==='guest')sendArrange();
   }
   render();
@@ -395,6 +415,7 @@ function startPlay(){
   spawnPowerups(POWERUPS);
   log('Both armies are deployed. Two land mines lie hidden somewhere in rows 4 to 7.');
   log(`${SIDE[0]} moves first.`);
+  sfx('start');
   if(S.mode==='local')showHandoff(0,'play');
   else{closeOverlay();render();toast('Battle begins. You move first.','info')}
 }
@@ -419,7 +440,7 @@ function promote(w,loserRank,at){
     const pool=S.pieces.filter(p=>p.alive&&p!==w&&p.rank>=SGT&&p.rank<=G5).map(p=>p.rank);
     nr=pool.length?pool[rnd(pool.length)]:SGT;
   }else nr=old+1;
-  w.rank=nr;
+  w.rank=nr;sfx('promote');
   log(`A power-up was activated at ${at}.`,'all','info');
   notify(w.owner,`Power-up! Your ${NAMES[old]} at ${at} was promoted to ${NAMES[nr]}.`,'good');
 }
@@ -437,19 +458,20 @@ function kill(p){p.alive=false;S.fallen[p.owner].push(p.rank)}
 
 function doMove(p,x,y){
   const owner=p.owner,foe=1-owner,at=sq(x,y);
-  S.last={from:{x:p.x,y:p.y},to:{x,y}};
+  S.last={from:{x:p.x,y:p.y},to:{x,y},owner};
   p.moved=true;
   const d=pieceAt(x,y);
   if(d)return resolveBattle(p,d,x,y);
   const mi=mineAt(x,y);
   if(mi>=0){
-    S.mines.splice(mi,1);S.craters.push({x,y});kill(p);fx(x,y,'boom');
+    S.mines.splice(mi,1);S.craters.push({x,y});kill(p);fx(x,y,'boom');sfx('mine');
     log(`A land mine exploded at ${at}. ${SIDE[owner]} lost a piece.`,'all','fire');
     notify(owner,`Your ${NAMES[p.rank]} stepped on a land mine at ${at}.`,'bad');
     notify(foe,`A land mine destroyed an enemy piece at ${at}.`,'good');
     if(p.rank===FLAG)finish(foe,`${SIDE[owner]}'s flag was destroyed by a land mine.`);
     return;
   }
+  sfx('move');
   p.x=x;p.y=y;S.safe.add(key(x,y));
   if(p.rank===FLAG&&y===farRow(owner))flagArrived(p);
 }
@@ -457,7 +479,7 @@ function doMove(p,x,y){
 function resolveBattle(a,d,x,y){
   const A=a.owner,D=d.owner,at=sq(x,y),ar=a.rank,dr=d.rank;
   const out=battle(ar,dr);
-  fx(x,y,'clash');
+  fx(x,y,'clash');sfx('battle',{out,A,D});
   let winner=null,loserRank=null;
   if(out==='a'){kill(d);a.x=x;a.y=y;S.safe.add(key(x,y));winner=a;loserRank=dr}
   else if(out==='d'){kill(a);winner=d;loserRank=ar}
@@ -503,6 +525,7 @@ function placeBarricade(owner,cells,tool){
   const kept=[],blown=[];
   cells.forEach(c=>{const mi=mineAt(c.x,c.y);if(mi>=0){S.mines.splice(mi,1);S.craters.push(c);blown.push(c);fx(c.x,c.y,'boom')}else kept.push(c)});
   if(kept.length)S.bars.push({owner,cells:kept});
+  sfx(blown.length?'mine':'bar');
   kept.forEach(c=>{
     const ui=puAt(c.x,c.y);if(ui<0)return;
     const free=[];for(let y=0;y<N;y++)for(let x=0;x<N;x++)if(!barAt(x,y)&&puAt(x,y)<0)free.push({x,y});
@@ -515,7 +538,7 @@ function placeBarricade(owner,cells,tool){
 
 function airStrike(owner,t){
   const at=sq(t.x,t.y);
-  S.skills[owner].air--;kill(t);fx(t.x,t.y,'strike');S.last={from:null,to:{x:t.x,y:t.y}};
+  S.skills[owner].air--;kill(t);fx(t.x,t.y,'strike');S.last={from:null,to:{x:t.x,y:t.y},owner};sfx('air');
   log(`${SIDE[owner]} called an air strike on ${at}. An enemy piece was destroyed.`,'all','fire');
   notify(owner,`Air strike hit ${at}. One enemy piece destroyed.`,'good');
   notify(t.owner,`Your ${NAMES[t.rank]} at ${at} was destroyed by an air strike.`,'bad');
@@ -528,7 +551,7 @@ function endTurn(){
   spawnPowerups(S.powerups.length);
   S.selected=null;S.tool='move';S.preview=null;S.barUsed=false;
   S.turn=1-S.turn;
-  const t=S.turn;
+  const t=S.turn;sfx('turn',{p:t});
   if(S.flagPending&&S.flagPending.owner===t){
     const f=flagOf(t);
     if(f&&f.y===farRow(t))return finish(t,`${SIDE[t]}'s flag held the enemy's back row for a full turn.`);
@@ -541,6 +564,7 @@ function endTurn(){
 }
 
 function finish(w,reason){
+  sfx('over',{w});
   S.phase='over';S.winner=w;S.reason=reason;S.tool='move';S.selected=null;S.preview=null;S.busy=false;S.handoff=null;
   clearInterval(S.timer);
   log(reason,'all','win');
@@ -749,6 +773,96 @@ function fxLoop(ts){
   else{ctx.clearRect(0,0,FX.w,FX.h);FX.running=false}
 }
 
+/* ---------- sound: synthesized with Web Audio, so nothing to download and it works offline ---------- */
+const SND={ctx:null,master:null,noise:null,muted:false};
+try{SND.muted=localStorage.getItem('gow-muted')==='1'}catch(e){}
+function audio(){
+  if(SND.muted)return null;
+  const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;
+  if(!SND.ctx){
+    try{SND.ctx=new AC()}catch(e){return null}
+    const comp=SND.ctx.createDynamicsCompressor();comp.threshold.value=-14;comp.ratio.value=4;comp.connect(SND.ctx.destination);
+    SND.master=SND.ctx.createGain();SND.master.gain.value=.7;SND.master.connect(comp);
+    const len=SND.ctx.sampleRate*2,buf=SND.ctx.createBuffer(1,len,SND.ctx.sampleRate),d=buf.getChannelData(0);
+    for(let i=0;i<len;i++)d[i]=Math.random()*2-1;
+    SND.noise=buf;
+  }
+  if(SND.ctx.state==='suspended')SND.ctx.resume().catch(()=>{});
+  return SND.ctx;
+}
+// Phones only allow sound after a tap, so wake the audio engine on the first touch.
+document.addEventListener('pointerdown',()=>{if(!SND.muted&&(!SND.ctx||SND.ctx.state!=='running'))audio()},true);
+
+function tone(f0,f1,dur,type,vol,delay){
+  const c=audio();if(!c)return;
+  const t=c.currentTime+(delay||0),o=c.createOscillator(),g=c.createGain();
+  o.type=type||'sine';o.frequency.setValueAtTime(f0,t);if(f1&&f1!==f0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(vol||.2,t+.012);g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  o.connect(g);g.connect(SND.master);o.start(t);o.stop(t+dur+.05);
+}
+function hiss(dur,o){
+  const c=audio();if(!c)return;o=o||{};
+  const t=c.currentTime+(o.delay||0),src=c.createBufferSource(),f=c.createBiquadFilter(),g=c.createGain();
+  src.buffer=SND.noise;f.type=o.type||'lowpass';f.Q.value=o.q||1;
+  f.frequency.setValueAtTime(o.f0||1000,t);if(o.f1)f.frequency.exponentialRampToValueAtTime(o.f1,t+dur);
+  g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(o.vol||.3,t+(o.attack||.005));g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  src.connect(f);f.connect(g);g.connect(SND.master);src.start(t,Math.random()*1.5);src.stop(t+dur+.05);
+}
+function notes(seq,type,vol,gap){let d=0;seq.forEach(([f,len])=>{tone(f,f,len,type,vol,d);d+=gap||len*.85})}
+function boom(delay,k){
+  k=k||1;
+  hiss(1.3*k,{type:'lowpass',f0:1400,f1:60,vol:.9,attack:.003,delay});
+  tone(120,32,.9*k,'sine',.7,delay);
+  for(let i=0;i<6;i++)hiss(.06,{type:'highpass',f0:2500,vol:.18,delay:delay+.1+Math.random()*.6});
+}
+const SOUNDS={
+  select(){tone(1250,1250,.035,'square',.035)},
+  tick(){tone(1000,1000,.03,'square',.04)},
+  move(){hiss(.07,{type:'bandpass',f0:1900,f1:900,q:2.5,vol:.32});tone(190,95,.09,'sine',.22)},
+  clash(){hiss(.2,{type:'highpass',f0:3200,f1:1800,vol:.28});tone(940,900,.3,'triangle',.11);tone(1420,1380,.26,'triangle',.07);tone(2100,2080,.2,'sine',.04)},
+  won(){notes([[523,.11],[784,.22]],'triangle',.16,.12)},
+  lost(){notes([[311,.16],[233,.34]],'triangle',.16,.16)},
+  both(){hiss(.25,{type:'lowpass',f0:500,f1:120,vol:.5});tone(140,70,.3,'sine',.3)},
+  bar(){[0,.14].forEach(d=>{hiss(.14,{type:'lowpass',f0:420,f1:140,vol:.6,delay:d});tone(95,58,.14,'sine',.32,d)})},
+  mine(){boom(0,1)},
+  air(){tone(1700,420,.36,'sine',.12);tone(1720,430,.36,'sine',.05);boom(.34,1.25)},
+  promote(){notes([[660,.09],[880,.09],[1320,.22]],'triangle',.12,.07);hiss(.3,{type:'highpass',f0:6000,vol:.06,delay:.1})},
+  turn(){tone(880,880,.22,'sine',.07);tone(1320,1320,.3,'sine',.05,.07)},
+  start(){notes([[392,.12],[523,.12],[659,.12],[784,.4]],'triangle',.13,.13);tone(98,98,.5,'sine',.15,.4)},
+  victory(){
+    notes([[523,.14],[659,.14],[784,.14],[1047,.6]],'triangle',.16,.15);
+    notes([[262,.14],[330,.14],[392,.14],[523,.6]],'square',.035,.15);
+    hiss(.5,{type:'lowpass',f0:300,f1:80,vol:.4,delay:.45});tone(110,55,.6,'sine',.35,.45);
+  },
+  defeat(){notes([[440,.35],[349,.35],[294,.9]],'triangle',.14,.4);tone(73,73,1.6,'sine',.12,.2)},
+};
+function snd(name){try{SOUNDS[name]&&SOUNDS[name]()}catch(e){}}
+function sfx(t,data){S.sfx.push({t,...(data||{})})}
+// Plays queued game sounds from this player's side of the table.
+function playSfx(list){
+  if(!list||!list.length||SND.muted)return;
+  const me=meSide();
+  for(const e of list){
+    if(e.t==='battle'){
+      snd('clash');
+      const pov=S.mode==='local'?e.A:me;
+      const res=e.out==='both'?'both':((e.out==='a')===(pov===e.A)?'won':'lost');
+      setTimeout(()=>snd(res),200);
+    }else if(e.t==='over'){
+      setTimeout(()=>snd(S.mode==='local'||e.w===me?'victory':'defeat'),500);
+    }else if(e.t==='turn'){
+      if(S.mode!=='local'&&e.p===me)setTimeout(()=>snd('turn'),250);
+    }else snd(e.t);
+  }
+}
+function setMuted(m){
+  SND.muted=m;
+  try{localStorage.setItem('gow-muted',m?'1':'0')}catch(e){}
+  if(SND.master)SND.master.gain.value=m?0:.7;
+  if(!m){audio();snd('select')}
+  const b=$('#soundBtn');if(b){b.setAttribute('aria-pressed',String(!m));b.setAttribute('aria-label',m?'Sound off':'Sound on');b.classList.toggle('off',m)}
+}
+
 /* ---------- view ---------- */
 function viewer(){if(S.mode==='online')return S.me;if(S.mode==='local')return S.phase==='setup'?S.setupPlayer:S.phase==='over'?0:S.turn;return 0}
 function meSide(){return S.mode==='online'?S.me:S.mode==='ai'?0:(S.phase==='over'?0:S.turn)}
@@ -765,7 +879,7 @@ function face(rank){
   return SHORT[rank];
 }
 
-function render(){renderStatus();renderBoard();renderPanel();playFx(S.fx);save();sync();S.fx=[];S.puFresh=false}
+function render(){renderStatus();renderBoard();renderPanel();playFx(S.fx);playSfx(S.sfx);save();sync();S.fx=[];S.sfx=[];S.puFresh=false}
 
 /* ---------- save & resume (a phone may close the app mid-game) ---------- */
 const SAVE_KEY='gow-save-v1';
@@ -825,9 +939,15 @@ function renderBoard(){
       if(y>=3&&y<=6)cls.push('band');else cls.push(y<3?'z0':'z1');
       if(showPU&&puAt(x,y)>=0){cls.push('pu-on');if(pop)cls.push('pop')}
       if(S.phase==='setup'&&homeRows(v).includes(y))cls.push('zone');
+      let trail='';
       if(S.last&&S.phase!=='setup'&&S.phase!=='menu'){
-        if(S.last.from&&S.last.from.x===x&&S.last.from.y===y)cls.push('lf');
-        if(S.last.to.x===x&&S.last.to.y===y)cls.push('lt');
+        const who=S.last.owner===v?'mine':'foe';
+        if(S.last.from&&S.last.from.x===x&&S.last.from.y===y){
+          cls.push('lf',who);
+          const a=toScreen(x,y,v),b=toScreen(S.last.to.x,S.last.to.y,v);
+          trail=`<span class="mk trail" style="--rot:${Math.round(Math.atan2(b.r-a.r,b.c-a.c)*180/Math.PI)}deg"></span>`;
+        }
+        if(S.last.to.x===x&&S.last.to.y===y)cls.push('lt',who);
       }
       const m=moves.get(k);if(m)cls.push(m.attack?'atk':'mv');
       if(barMode&&validBar(barCells(x,y,S.tool,v)))cls.push('can');
@@ -835,7 +955,7 @@ function renderBoard(){
       let p=pieceAt(x,y);
       if(p&&S.phase==='setup'&&p.owner!==v)p=null;
       if(airMode&&p&&p.owner!==me)cls.push('tgt');
-      let inner='';
+      let inner=trail;
       const bc=barAt(x,y);
       if(bc){
         const other=bc.b.cells[1-bc.i];let j='';
@@ -939,6 +1059,8 @@ function renderPanel(){
         <div><span class="lg"><span class="bag o0" style="inset:3px"></span></span>Barricade, blocks all pieces</div>
         <div><span class="lg band"></span>Rows 4–7, mines hidden here</div>
         <div><span class="lg"><span class="crater"></span></span>Exploded mine, now safe</div>
+        <div><span class="lg lastfoe"></span>Enemy's last move</div>
+        <div><span class="lg lastme"></span>Your last move</div>
       </div>
       ${fallen.length?`<div class="eyebrow">Your fallen</div><div class="fallen">${fallen.map(r=>`<span title="${NAMES[r]}">${SHORT[r]}</span>`).join('')}</div>`:''}
     </div>`;
@@ -1077,7 +1199,7 @@ function playClick(x,y){
   }
   if(p&&p.owner===me&&S.selected!==p.id){
     if(!legalMoves(p).length)toast('That piece is boxed in and cannot move.','info');
-    S.selected=p.id;
+    S.selected=p.id;snd('select');
   }else S.selected=null;
   render();
 }
@@ -1100,6 +1222,8 @@ $('#board').addEventListener('mouseleave',()=>document.querySelectorAll('.sq.hov
 $('#panel').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b&&!b.disabled)act(b.dataset.act)});
 $('#card').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b&&!b.disabled)act(b.dataset.act)});
 $('#menuBtn').addEventListener('click',showMenu);
+$('#soundBtn').addEventListener('click',()=>setMuted(!SND.muted));
+{const b=$('#soundBtn');b.setAttribute('aria-pressed',String(!SND.muted));b.setAttribute('aria-label',SND.muted?'Sound off':'Sound on');b.classList.toggle('off',SND.muted)}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S.phase==='play'&&S.tool!=='move'){act('cancel')}});
 
 /* ---------- applying orders (shared by every mode; the online host also uses it to check the guest's orders) ---------- */
@@ -1185,7 +1309,7 @@ function viewFor(o){
     pieces,bars:S.bars,mines:over?S.mines:[],craters:S.craters,powerups:S.powerups,skills:S.skills,
     barUsed:S.barUsed,last:S.last,flagPending:S.flagPending,ready:S.ready,timeLeft:S.timeLeft,
     log:S.log.filter(e=>e.vis==='all'||e.vis===o),fallen:o===0?[S.fallen[0],[]]:[[],S.fallen[1]],
-    fx:S.fx,puFresh:S.puFresh,toasts:S.pending[o]};
+    fx:S.fx,sfx:S.sfx,puFresh:S.puFresh,toasts:S.pending[o]};
   return v;
 }
 function sync(force){
