@@ -44,5 +44,7 @@ Then open http://localhost:5174. Phones on the same Wi-Fi can use `http://<this 
 - Higher rank wins a battle; equal ranks both fall. The Spy beats Sergeant and up but loses to a Private. Ranks stay hidden; you only learn if you won or lost.
 - Win by capturing the enemy flag, by reaching the enemy's back row with your flag, or by hitting the flag with your air strike.
 - Barricades: 2 horizontal and 2 vertical per side, one per turn, built before you move.
+- Air strike: once per game, destroys any enemy piece or one square of any barricade.
 - Power-ups promote the winner of a battle fought on them, and jump to new squares after every turn.
+- Veterans: every 3rd enemy a piece defeats in battle promotes it one rank, stacking with power-ups. A 5★ General or a Spy cannot rank up.
 - Land mines hide in rows 4–7 and destroy whatever steps on them.

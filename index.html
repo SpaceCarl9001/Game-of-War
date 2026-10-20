@@ -110,7 +110,7 @@ button{font:inherit;color:inherit}
 .sq.atk{box-shadow:inset 0 0 0 3px var(--ember);animation:atk .8s ease-in-out infinite alternate}
 @keyframes atk{to{box-shadow:inset 0 0 0 3px var(--flame),inset 0 0 14px rgba(255,106,43,.6)}}
 .sq.tgt{cursor:crosshair}
-.sq.tgt .pc{outline:2px dashed var(--ember);outline-offset:-1px}
+.sq.tgt .pc,.sq.tgt .bag{outline:2px dashed var(--ember);outline-offset:-1px}
 
 /* Power-up: the square itself glows and pulses */
 .pu-on{z-index:1}
@@ -145,6 +145,10 @@ button{font:inherit;color:inherit}
 .pc.o0 .flag{color:#b8321c} .pc.o1 .flag{color:var(--ember)}
 .pc.selp{outline:3px solid var(--brass-hi);outline-offset:1px;transform:translateY(-2px)}
 .pc.o0 .stars{color:#9a6c12} .pc.o1 .stars{color:var(--flame)}
+/* Kill count, shown only to the piece's owner */
+.pc .kc{position:absolute;top:-5px;right:-6px;min-width:calc(var(--cell)*.26);height:calc(var(--cell)*.26);padding:0 3px;
+  border-radius:999px;display:flex;align-items:center;justify-content:center;
+  font:800 calc(var(--cell)*.17)/1 var(--f-ui);letter-spacing:0;background:var(--ember);color:#1e0d05;box-shadow:0 1px 2px rgba(0,0,0,.5)}
 
 .bag{position:absolute;inset:7%;z-index:1;border-radius:7px;
   background:repeating-linear-gradient(0deg,#a3916a 0 5px,#857553 5px 6px),#90805b;
@@ -291,7 +295,7 @@ const NAMES=['Flag','Private','Sergeant','2nd Lieutenant','1st Lieutenant','Capt
 const SHORT=['FLAG','PVT','SGT','2LT','1LT','CPT','MAJ','LTC','COL','1★','2★','3★','4★','5★','SPY'];
 const ARMY=[FLAG,PVT,PVT,PVT,PVT,PVT,PVT,2,3,4,5,6,7,8,9,10,11,12,13,SPY,SPY];
 const SIDE=['Ivory','Onyx'];
-const SETUP_SECS=90, MINES=2, POWERUPS=12;
+const SETUP_SECS=90, MINES=2, POWERUPS=12, VET=3;
 const DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
 const ATK=[0,.55,.3,.35,.4,.5,.6,.7,.8,.85,.9,.95,1,1,.9];
 
@@ -340,7 +344,7 @@ function legalMoves(p){
 function hasAction(o){return S.skills[o].air>0&&alive(1-o).length>0||alive(o).some(p=>legalMoves(p).length)}
 
 /* ---------- setup ---------- */
-function addPiece(owner,rank,x,y){S.pieces.push({id:S.nextId++,owner,rank,x,y,alive:true,moved:false})}
+function addPiece(owner,rank,x,y){S.pieces.push({id:S.nextId++,owner,rank,x,y,alive:true,moved:false,kills:0})}
 // Random formation with the flag on the back row and a guard in front of it.
 // Existing pieces are repositioned (keeping their ids) so an online guest can shuffle its own army.
 function formation(owner){
@@ -444,6 +448,19 @@ function promote(w,loserRank,at){
   log(`A power-up was activated at ${at}.`,'all','info');
   notify(w.owner,`Power-up! Your ${NAMES[old]} at ${at} was promoted to ${NAMES[nr]}.`,'good');
 }
+// Veterans: every VET-th enemy a piece defeats in battle promotes it one rank, on top of any power-up.
+// Only the owner is told; the opponent has to keep count to know.
+function creditKill(w,at){
+  w.kills=(w.kills||0)+1;
+  if(w.kills%VET)return;
+  const old=w.rank;
+  if(old===G5||old===SPY||old===FLAG){
+    notify(w.owner,`Your ${NAMES[old]} at ${at} has ${w.kills} kills but cannot rank up any higher.`,'info');
+    return;
+  }
+  w.rank=old+1;sfx('promote');
+  notify(w.owner,`Veteran! Your ${NAMES[old]} at ${at} reached ${w.kills} kills and was promoted to ${NAMES[w.rank]}.`,'good');
+}
 
 /* ---------- actions ---------- */
 function battle(a,d){
@@ -503,6 +520,7 @@ function resolveBattle(a,d,x,y){
     if(!winner)log(`The power-up at ${at} was destroyed in the battle.`);
     else promote(winner,loserRank,at);
   }
+  if(winner)creditKill(winner,at);
   if(winner&&winner.rank===FLAG&&winner.y===farRow(winner.owner)&&out==='a')flagArrived(winner);
 }
 
@@ -543,6 +561,17 @@ function airStrike(owner,t){
   notify(owner,`Air strike hit ${at}. One enemy piece destroyed.`,'good');
   notify(t.owner,`Your ${NAMES[t.rank]} at ${at} was destroyed by an air strike.`,'bad');
   if(t.rank===FLAG)finish(owner,`${SIDE[owner]}'s air strike hit the flag at ${at}.`);
+}
+// The air strike can instead knock out one square of any barricade; the other square stays.
+function airStrikeBar(owner,x,y){
+  const at=sq(x,y),hit=barAt(x,y),bo=hit.b.owner;
+  S.skills[owner].air--;
+  hit.b.cells.splice(hit.i,1);
+  if(!hit.b.cells.length)S.bars.splice(S.bars.indexOf(hit.b),1);
+  fx(x,y,'strike');S.last={from:null,to:{x,y},owner};sfx('air');
+  log(`${SIDE[owner]} called an air strike on ${at} and destroyed one square of ${bo===owner?'its own':SIDE[bo]+"'s"} barricade.`,'all','fire');
+  notify(owner,`Air strike hit ${at}. That barricade square is gone.`,'good');
+  if(bo!==owner)notify(bo,`An air strike destroyed your barricade square at ${at}.`,'bad');
 }
 
 function endTurn(){
@@ -954,9 +983,9 @@ function renderBoard(){
       if(prev.some(q=>q.x===x&&q.y===y))cls.push('prev');
       let p=pieceAt(x,y);
       if(p&&S.phase==='setup'&&p.owner!==v)p=null;
-      if(airMode&&p&&p.owner!==me)cls.push('tgt');
-      let inner=trail;
       const bc=barAt(x,y);
+      if(airMode&&(p&&p.owner!==me||bc))cls.push('tgt');
+      let inner=trail;
       if(bc){
         const other=bc.b.cells[1-bc.i];let j='';
         if(other){const a=toScreen(x,y,v),b=toScreen(other.x,other.y,v);j=b.c>a.c?'jr':b.c<a.c?'jl':b.r<a.r?'ju':'jd'}
@@ -968,8 +997,10 @@ function renderBoard(){
       if(p){
         const show=p.owner===v||reveal;
         const selp=(sel&&sel.id===p.id)||(S.phase==='setup'&&S.preview&&S.preview.x===x&&S.preview.y===y);
-        inner+=`<span class="pc o${p.owner}${show?'':' hid'}${selp?' selp':''}">${show?face(p.rank):''}</span>`;
+        const kills=show&&p.kills?`<span class="kc" title="${p.kills} kill${p.kills>1?'s':''}">${p.kills}</span>`:'';
+        inner+=`<span class="pc o${p.owner}${show?'':' hid'}${selp?' selp':''}">${show?face(p.rank):''}${kills}</span>`;
         label+=show?` ${SIDE[p.owner]} ${NAMES[p.rank]}`:` ${SIDE[p.owner]} piece, rank hidden`;
+        if(kills)label+=`, ${p.kills} kill${p.kills>1?'s':''}`;
       }
       if(showPU&&puAt(x,y)>=0)label+=', glowing power-up square';
       if(bc)label+=', barricade';
@@ -1023,7 +1054,7 @@ function renderPanel(){
   else if(S.busy&&S.mode==='online'&&S.turn===me)hint='Sending your orders…';
   else if(!human)hint='Wait for the enemy to finish their turn.';
   else if(S.tool==='barH'||S.tool==='barV')hint=`Tap a highlighted square to preview, then tap it again to build. The barricade covers that square and the one ${S.tool==='barH'?'to its right':'below it'}. You still move afterwards.`;
-  else if(S.tool==='air')hint='Tap an enemy piece to aim, then tap it again to fire. The strike ends your turn.';
+  else if(S.tool==='air')hint='Tap an enemy piece or a barricade square to aim, then tap it again to fire. The strike ends your turn.';
   else if(S.barUsed)hint='Barricade built. Now move one piece to end your turn.';
   else hint='Select one of your pieces, then a highlighted square. Build a barricade first if you want one this turn.';
   const fallen=S.fallen[me].slice().sort((a,b)=>b-a);
@@ -1076,8 +1107,9 @@ const RULES=`<details class="rules"${'%OPEN%'}><summary>Rules of engagement</sum
   <li><b>Moving</b>: one piece, one square forward, back or sideways per turn. Moving onto an enemy starts a battle. Neither side sees ranks; you only learn if you won or lost.</li>
   <li><b>Winning</b>: capture the enemy flag, or bring your own flag to the enemy's back row. If an enemy piece is next to it when it arrives, it must survive one more turn.</li>
   <li><b>Deployment</b>: 90 seconds to arrange your 21 pieces in your first three rows.</li>
-  <li><b>Barricades</b>: each side has 2 horizontal and 2 vertical, two squares each, permanent. One per turn, built before you move. Building one does not use up your move.</li>
-  <li><b>Air strike</b>: once per game, destroys any enemy piece and ends your turn. Hitting the flag wins the game.</li>
+  <li><b>Barricades</b>: each side has 2 horizontal and 2 vertical, two squares each. They stay until an air strike knocks out a square. One per turn, built before you move. Building one does not use up your move.</li>
+  <li><b>Air strike</b>: once per game, destroys any enemy piece or one square of any barricade, and ends your turn. Hitting the flag wins the game.</li>
+  <li><b>Veterans</b>: every 3rd enemy a piece defeats in battle promotes it one rank. This stacks with power-ups. A 5★ General or a Spy cannot rank up. Only you see your pieces' kill counts.</li>
   <li><b>Power-ups</b> (12): they jump to new squares after every turn. A battle on one promotes the winner one rank, then it is gone. A 5★ General or a Spy only uses it up. If both pieces fall, it is lost. A Private that beats a Spy on one becomes a random officer rank still on the board.</li>
   <li><b>Land mines</b> (2): hidden between rows 4 and 7 and never move. A piece that steps on one is destroyed. A barricade built on one sets it off and loses that square.</li>
 </ul></details>`;
@@ -1187,9 +1219,9 @@ function playClick(x,y){
     S.preview={x,y};render();return;
   }
   if(S.tool==='air'){
-    const t=pieceAt(x,y);
-    if(!t||t.owner===me){toast('Pick an enemy piece to strike.','info');return}
-    if(S.preview&&S.preview.x===x&&S.preview.y===y){S.tool='move';S.preview=null;commit({type:'air',id:t.id});return}
+    const t=pieceAt(x,y),onBar=!!barAt(x,y);
+    if(!onBar&&(!t||t.owner===me)){toast('Pick an enemy piece or a barricade square to strike.','info');return}
+    if(S.preview&&S.preview.x===x&&S.preview.y===y){S.tool='move';S.preview=null;commit(onBar?{type:'air',x,y}:{type:'air',id:t.id});return}
     S.preview={x,y};render();return;
   }
   const p=pieceAt(x,y);
@@ -1241,9 +1273,16 @@ function applyAction(owner,a){
     placeBarricade(owner,cells,tool);render();return true;
   }
   if(a.type==='air'){
-    const t=getPiece(a.id);
-    if(!sk.air||!t||!t.alive||t.owner===owner)return false;
-    airStrike(owner,t);endTurn();return true;
+    if(!sk.air)return false;
+    if(a.id!=null){
+      const t=getPiece(a.id);
+      if(!t||!t.alive||t.owner===owner)return false;
+      airStrike(owner,t);
+    }else{
+      if(!Number.isInteger(a.x)||!Number.isInteger(a.y)||!barAt(a.x,a.y))return false;
+      airStrikeBar(owner,a.x,a.y);
+    }
+    endTurn();return true;
   }
   if(a.type==='move'){
     const p=getPiece(a.id);
@@ -1304,7 +1343,7 @@ function shareInvite(){
 function viewFor(o){
   const over=S.phase==='over';
   const pieces=S.pieces.filter(p=>p.alive&&(p.owner===o||S.phase!=='setup'))
-    .map(p=>p.owner===o||over?{...p}:{...p,rank:null});
+    .map(p=>p.owner===o||over?{...p}:{...p,rank:null,kills:0});
   const v={mode:'online',me:o,phase:S.phase,turn:S.turn,moves:S.moves,winner:S.winner,reason:S.reason,
     pieces,bars:S.bars,mines:over?S.mines:[],craters:S.craters,powerups:S.powerups,skills:S.skills,
     barUsed:S.barUsed,last:S.last,flagPending:S.flagPending,ready:S.ready,timeLeft:S.timeLeft,
