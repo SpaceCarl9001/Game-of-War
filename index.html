@@ -258,6 +258,10 @@ button{font:inherit;color:inherit}
 .join input:focus{outline:2px solid var(--brass-hi);outline-offset:1px}
 .join input::placeholder{color:var(--muted);opacity:.6}
 .card p.netmsg{color:var(--ink)}
+/* Surrender */
+.btn.surrender{margin-top:10px;width:100%;background:transparent;border:1px dashed var(--line);color:var(--muted);font-size:13px;padding:8px 10px}
+.btn.surrender:hover:not(:disabled){color:var(--ember);border-color:var(--ember)}
+.btn.danger{background:var(--ember);border-color:var(--ember);color:#1e0d05}
 /* Player names */
 .names{display:grid;gap:12px}
 .namefield{display:grid;gap:6px;flex:1 1 100%}
@@ -1080,6 +1084,7 @@ function renderPanel(){
       <div class="${turnCls}">${turnTxt}</div>
       <div class="counts"><span>Your pieces <b>${alive(me).length}</b></span><span>Enemy pieces <b>${alive(1-me).length}</b></span><span>Power-ups <b>${S.powerups.length}</b></span></div>
       ${netLine()}
+      ${S.phase==='play'?`<button class="btn surrender" type="button" data-act="surrender" ${S.mode==='online'&&!netUp()?'disabled':''}><span aria-hidden="true">⚐&#xFE0E;</span> Surrender</button>`:''}
     </div>
     <div class="sec">
       <div class="eyebrow ember">Special orders</div>
@@ -1126,6 +1131,7 @@ const RULES=`<details class="rules"${'%OPEN%'}><summary>Rules of engagement</sum
   <li><b>Air strike</b>: once per game, destroys any enemy piece or one square of any barricade, and ends your turn. Hitting the flag wins the game.</li>
   <li><b>Veterans</b>: every 3rd enemy a piece defeats in battle promotes it one rank. This stacks with power-ups. A 5★ General or a Spy cannot rank up. Only you see your pieces' kill counts.</li>
   <li><b>Power-ups</b> (12): they jump to new squares after every turn. A battle on one promotes the winner one rank, then it is gone. A 5★ General or a Spy only uses it up. If both pieces fall, it is lost. A Private that beats a Spy on one becomes a random officer rank still on the board.</li>
+  <li><b>Surrender</b>: the Surrender button under your piece counts ends the battle at once; your opponent wins.</li>
   <li><b>Land mines</b> (2): hidden between rows 4 and 7 and never move. A piece that steps on one is destroyed. A barricade built on one sets it off and loses that square.</li>
 </ul></details>`;
 
@@ -1168,6 +1174,21 @@ function showOver(){
     <p>${S.reason}</p>
     <p>Every rank and any unexploded mine is now shown on the board.</p>
     <div class="row"><button class="btn primary" type="button" data-act="again" data-focus ${on&&!netUp()?'disabled':''}>${on?'Rematch':'Play again'}</button><button class="btn" type="button" data-act="review">Review the board</button><button class="btn" type="button" data-act="${on?'leave':'menu'}">${on?'Leave game':'Main menu'}</button></div>`,false,'over');
+}
+
+/* ---------- surrender ---------- */
+// Ends the battle at once as a win for the other side. Online, the guest asks the host (which runs the game).
+function surrender(o){
+  if(S.phase!=='play')return false;
+  finish(1-o,`${who(o)} surrendered.`);
+  return true;
+}
+function askSurrender(){
+  const me=meSide();
+  overlay(`<div class="eyebrow">Surrender</div>
+    <h2>Give up the battle?</h2>
+    <p>${who(1-me)} wins immediately${S.mode==='online'?', and both of you see the result':''}. This cannot be undone.</p>
+    <div class="row"><button class="btn danger" type="button" data-act="surrender-yes">Yes, surrender</button><button class="btn primary" type="button" data-act="keep" data-focus>Keep fighting</button></div>`,false,'surrender');
 }
 
 /* ---------- player names, asked before every game ---------- */
@@ -1251,6 +1272,14 @@ function act(a){
       if(!isHumanTurn())break;
       S.tool=S.tool===a?'move':a;S.preview=null;S.selected=null;render();break;
     case'cancel':S.tool='move';S.preview=null;render();break;
+    case'surrender':if(S.phase==='play')askSurrender();break;
+    case'surrender-yes':
+      closeOverlay();
+      if(S.phase!=='play')break;
+      if(S.mode==='online'&&NET.role==='guest'){send({type:'surrender'});S.busy=true;render();toast('Surrender sent.','info')}
+      else surrender(meSide());
+      break;
+    case'keep':closeOverlay();break;
   }
 }
 
@@ -1508,6 +1537,7 @@ function onData(m){
     if(m.type==='action'){if(!applyAction(1,m.a))sync(true)}
     else if(m.type==='arrange')hostArrange(m.pos);
     else if(m.type==='ready'){if(S.phase==='setup'&&!S.ready[1])markReady(1)}
+    else if(m.type==='surrender'){if(S.phase==='play')surrender(1)}
     else if(m.type==='rematch'){if(S.phase==='over'){toast(`${who(1)} started a rematch.`,'info');newOnlineGame()}}
     else if(m.type==='hello'){
       const name=cleanName(m.name);

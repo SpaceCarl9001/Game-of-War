@@ -50,3 +50,4 @@ Then open http://localhost:5174. Phones on the same Wi-Fi can use `http://<this 
 - Power-ups promote the winner of a battle fought on them, and jump to new squares after every turn.
 - Veterans: every 3rd enemy a piece defeats in battle promotes it one rank, stacking with power-ups. A 5★ General or a Spy cannot rank up.
 - Land mines hide in rows 4–7 and destroy whatever steps on them.
+- Surrender: the Surrender button under your piece counts ends the battle at once (after a confirmation); your opponent wins.
