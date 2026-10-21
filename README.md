@@ -10,6 +10,8 @@ A 2D hidden-rank war strategy board game on a 10×10 field, in the style of Game
 - **Against the computer:** works offline.
 - **Pass and play:** two players on one phone, with a hand-off screen between turns. Works offline.
 
+Before every game, each player types their name (the last names used are filled in). Names replace "Ivory" and "Onyx" in the turn indicator, hand-off screens, field log and result screen. Online, the host enters theirs when creating the room and the guest on the join screen.
+
 ## Install on a phone
 
 Open https://spacecarl9001.github.io/Game-of-War/ on your phone, then:

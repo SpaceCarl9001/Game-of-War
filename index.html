@@ -258,6 +258,14 @@ button{font:inherit;color:inherit}
 .join input:focus{outline:2px solid var(--brass-hi);outline-offset:1px}
 .join input::placeholder{color:var(--muted);opacity:.6}
 .card p.netmsg{color:var(--ink)}
+/* Player names */
+.names{display:grid;gap:12px}
+.namefield{display:grid;gap:6px;flex:1 1 100%}
+.namefield .nlabel{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.namefield .chip{width:14px;height:14px;border-radius:3px;flex:none}
+.namefield input{font:600 20px/1.2 var(--f-ui);letter-spacing:normal;text-transform:none;flex:none;padding:10px 12px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:4px;min-width:0}
+.namefield input:focus{outline:2px solid var(--brass-hi);outline-offset:1px}
+.namefield input::placeholder{color:var(--muted);opacity:.6}
 .netline{display:flex;align-items:center;gap:8px;font:500 13px var(--f-mono);color:var(--muted)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
 .dot.on{background:var(--green)} .dot.off{background:var(--red)}
@@ -295,6 +303,13 @@ const NAMES=['Flag','Private','Sergeant','2nd Lieutenant','1st Lieutenant','Capt
 const SHORT=['FLAG','PVT','SGT','2LT','1LT','CPT','MAJ','LTC','COL','1★','2★','3★','4★','5★','SPY'];
 const ARMY=[FLAG,PVT,PVT,PVT,PVT,PVT,PVT,2,3,4,5,6,7,8,9,10,11,12,13,SPY,SPY];
 const SIDE=['Ivory','Onyx'];
+// Player names. Shown wherever a side is mentioned; the side colour (Ivory light, Onyx dark) stays the same.
+// Names reach other players' screens (and the field log renders HTML), so they are cleaned to plain text.
+const NAME_MAX=16;
+function cleanName(s){return String(s??'').replace(/[\u0000-\u001f<>&"'`\\]/g,'').replace(/\s+/g,' ').trim().slice(0,NAME_MAX).trim()}
+function who(o){return(S&&S.names&&S.names[o])||SIDE[o]}
+function savedNames(){try{return JSON.parse(localStorage.getItem('gow-names'))||{}}catch(e){return{}}}
+function rememberNames(patch){try{localStorage.setItem('gow-names',JSON.stringify({...savedNames(),...patch}))}catch(e){}}
 const SETUP_SECS=90, MINES=2, POWERUPS=12, VET=3;
 const DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
 const ATK=[0,.55,.3,.35,.4,.5,.6,.7,.8,.85,.9,.95,1,1,.9];
@@ -313,7 +328,7 @@ const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
 
 let S;
 function freshState(mode){
-  return {mode,phase:'menu',pieces:[],bars:[],mines:[],craters:[],powerups:[],turn:0,
+  return {mode,phase:'menu',names:[SIDE[0],SIDE[1]],pieces:[],bars:[],mines:[],craters:[],powerups:[],turn:0,
     skills:[{h:2,v:2,air:1},{h:2,v:2,air:1}],barUsed:false,tool:'move',selected:null,preview:null,
     log:[],pending:[[],[]],flagPending:null,winner:null,reason:'',setupPlayer:0,ready:[false,false],
     timeLeft:SETUP_SECS,timer:null,moves:0,last:null,fx:[],puFresh:false,safe:new Set(),nextId:1,
@@ -373,7 +388,7 @@ function beginSetup(p){
     S.timeLeft--;
     if(S.timeLeft<=0){
       if(S.mode==='online'){toast('Time is up. Both formations are locked in.','info');S.ready=[true,true];startPlay();return}
-      toast(`Time is up. ${SIDE[p]}'s formation is locked in.`,'info');markReady(p);return;
+      toast(`Time is up. ${who(p)}'s formation is locked in.`,'info');markReady(p);return;
     }
     tickClock();
   },1000);
@@ -418,7 +433,7 @@ function startPlay(){
   S.mines=shuffle(band).slice(0,MINES);
   spawnPowerups(POWERUPS);
   log('Both armies are deployed. Two land mines lie hidden somewhere in rows 4 to 7.');
-  log(`${SIDE[0]} moves first.`);
+  log(`${who(0)} moves first.`);
   sfx('start');
   if(S.mode==='local')showHandoff(0,'play');
   else{closeOverlay();render();toast('Battle begins. You move first.','info')}
@@ -482,10 +497,10 @@ function doMove(p,x,y){
   const mi=mineAt(x,y);
   if(mi>=0){
     S.mines.splice(mi,1);S.craters.push({x,y});kill(p);fx(x,y,'boom');sfx('mine');
-    log(`A land mine exploded at ${at}. ${SIDE[owner]} lost a piece.`,'all','fire');
+    log(`A land mine exploded at ${at}. ${who(owner)} lost a piece.`,'all','fire');
     notify(owner,`Your ${NAMES[p.rank]} stepped on a land mine at ${at}.`,'bad');
     notify(foe,`A land mine destroyed an enemy piece at ${at}.`,'good');
-    if(p.rank===FLAG)finish(foe,`${SIDE[owner]}'s flag was destroyed by a land mine.`);
+    if(p.rank===FLAG)finish(foe,`${who(owner)}'s flag was destroyed by a land mine.`);
     return;
   }
   sfx('move');
@@ -501,7 +516,7 @@ function resolveBattle(a,d,x,y){
   if(out==='a'){kill(d);a.x=x;a.y=y;S.safe.add(key(x,y));winner=a;loserRank=dr}
   else if(out==='d'){kill(a);winner=d;loserRank=ar}
   else{kill(a);kill(d)}
-  log(`${SIDE[A]} attacked ${at}. `+(out==='a'?`${SIDE[A]} won.`:out==='d'?`${SIDE[D]} held the square.`:'Both pieces were eliminated.'),'all','battle');
+  log(`${who(A)} attacked ${at}. `+(out==='a'?`${who(A)} won.`:out==='d'?`${who(D)} held the square.`:'Both pieces were eliminated.'),'all','battle');
   if(out==='a'){
     notify(A,`Victory at ${at}. Your ${NAMES[ar]} won the attack.`,'good');
     notify(D,`Defeat at ${at}. Your ${NAMES[dr]} was eliminated.`,'bad');
@@ -512,8 +527,8 @@ function resolveBattle(a,d,x,y){
     notify(A,`Both eliminated at ${at}. Your ${NAMES[ar]} fell with the enemy piece.`,'info');
     notify(D,`Both eliminated at ${at}. Your ${NAMES[dr]} fell with the attacker.`,'info');
   }
-  if(dr===FLAG&&out==='a')return finish(A,`${SIDE[A]} captured the enemy flag at ${at}.`);
-  if(ar===FLAG&&out==='d')return finish(D,`${SIDE[A]}'s flag attacked and was captured at ${at}.`);
+  if(dr===FLAG&&out==='a')return finish(A,`${who(A)} captured the enemy flag at ${at}.`);
+  if(ar===FLAG&&out==='d')return finish(D,`${who(A)}'s flag attacked and was captured at ${at}.`);
   const ui=puAt(x,y);
   if(ui>=0){
     S.powerups.splice(ui,1);
@@ -527,9 +542,9 @@ function resolveBattle(a,d,x,y){
 function flagArrived(p){
   if(S.phase!=='play')return;
   const threatened=DIRS.some(([dx,dy])=>{const q=pieceAt(p.x+dx,p.y+dy);return q&&q.owner!==p.owner});
-  if(!threatened)return finish(p.owner,`${SIDE[p.owner]}'s flag reached the enemy's back row.`);
+  if(!threatened)return finish(p.owner,`${who(p.owner)}'s flag reached the enemy's back row.`);
   S.flagPending={owner:p.owner};
-  log(`${SIDE[p.owner]}'s flag reached the back row next to an enemy piece. It must survive one turn to win.`,'all','info');
+  log(`${who(p.owner)}'s flag reached the back row next to an enemy piece. It must survive one turn to win.`,'all','info');
 }
 
 function barCells(ax,ay,tool,v){
@@ -549,7 +564,7 @@ function placeBarricade(owner,cells,tool){
     const free=[];for(let y=0;y<N;y++)for(let x=0;x<N;x++)if(!barAt(x,y)&&puAt(x,y)<0)free.push({x,y});
     if(free.length)S.powerups[ui]=free[rnd(free.length)];else S.powerups.splice(ui,1);
   });
-  log(`${SIDE[owner]} built a ${tool==='barH'?'horizontal':'vertical'} barricade at ${cells.map(c=>sq(c.x,c.y)).join('–')}.`);
+  log(`${who(owner)} built a ${tool==='barH'?'horizontal':'vertical'} barricade at ${cells.map(c=>sq(c.x,c.y)).join('–')}.`);
   if(blown.length)log(`A hidden land mine went off under it at ${blown.map(c=>sq(c.x,c.y)).join(' and ')}. ${blown.length===2?'The whole barricade was destroyed.':'Half of the barricade was destroyed.'}`,'all','fire');
   if(blown.length)notify(owner,`Your barricade set off a land mine. ${blown.length===2?'Nothing':'One square'} of it remains.`,'bad');
 }
@@ -557,10 +572,10 @@ function placeBarricade(owner,cells,tool){
 function airStrike(owner,t){
   const at=sq(t.x,t.y);
   S.skills[owner].air--;kill(t);fx(t.x,t.y,'strike');S.last={from:null,to:{x:t.x,y:t.y},owner};sfx('air');
-  log(`${SIDE[owner]} called an air strike on ${at}. An enemy piece was destroyed.`,'all','fire');
+  log(`${who(owner)} called an air strike on ${at}. An enemy piece was destroyed.`,'all','fire');
   notify(owner,`Air strike hit ${at}. One enemy piece destroyed.`,'good');
   notify(t.owner,`Your ${NAMES[t.rank]} at ${at} was destroyed by an air strike.`,'bad');
-  if(t.rank===FLAG)finish(owner,`${SIDE[owner]}'s air strike hit the flag at ${at}.`);
+  if(t.rank===FLAG)finish(owner,`${who(owner)}'s air strike hit the flag at ${at}.`);
 }
 // The air strike can instead knock out one square of any barricade; the other square stays.
 function airStrikeBar(owner,x,y){
@@ -569,7 +584,7 @@ function airStrikeBar(owner,x,y){
   hit.b.cells.splice(hit.i,1);
   if(!hit.b.cells.length)S.bars.splice(S.bars.indexOf(hit.b),1);
   fx(x,y,'strike');S.last={from:null,to:{x,y},owner};sfx('air');
-  log(`${SIDE[owner]} called an air strike on ${at} and destroyed one square of ${bo===owner?'its own':SIDE[bo]+"'s"} barricade.`,'all','fire');
+  log(`${who(owner)} called an air strike on ${at} and destroyed one square of ${bo===owner?'their own':who(bo)+"'s"} barricade.`,'all','fire');
   notify(owner,`Air strike hit ${at}. That barricade square is gone.`,'good');
   if(bo!==owner)notify(bo,`An air strike destroyed your barricade square at ${at}.`,'bad');
 }
@@ -583,10 +598,10 @@ function endTurn(){
   const t=S.turn;sfx('turn',{p:t});
   if(S.flagPending&&S.flagPending.owner===t){
     const f=flagOf(t);
-    if(f&&f.y===farRow(t))return finish(t,`${SIDE[t]}'s flag held the enemy's back row for a full turn.`);
+    if(f&&f.y===farRow(t))return finish(t,`${who(t)}'s flag held the enemy's back row for a full turn.`);
     S.flagPending=null;
   }
-  if(!hasAction(t))return finish(1-t,`${SIDE[t]} has no legal moves left.`);
+  if(!hasAction(t))return finish(1-t,`${who(t)} has no legal moves left.`);
   if(S.mode==='local'){showHandoff(t,'play');return}
   render();
   if(S.mode==='ai'&&t===1){S.busy=true;renderStatus();renderPanel();setTimeout(aiTurn,700+rnd(500))}
@@ -611,7 +626,7 @@ function aiTurn(){
   if(t){airStrike(me,t);endTurn();return}
   const mv=aiPickMove(me);
   if(mv){doMove(mv.p,mv.x,mv.y);endTurn();return}
-  finish(0,`${SIDE[1]} has no legal moves left.`);
+  finish(0,`${who(1)} has no legal moves left.`);
 }
 function aiMaybeBarricade(me){
   const sk=S.skills[me];if(!sk.h&&!sk.v)return;
@@ -940,14 +955,14 @@ function resumeSaved(){
 function renderStatus(){
   const st=$('#status');
   if(S.phase==='menu')st.innerHTML='<span class="muted">Choose a mode to begin</span>';
-  else if(S.phase==='setup')st.innerHTML=`<span class="chip o${viewer()}"></span>${S.mode==='online'?'Both sides deploying':SIDE[S.setupPlayer]+' deploying'} <span class="clock${S.timeLeft<=15?' low':''}" id="hdrClock">${fmt(S.timeLeft)}</span>`;
+  else if(S.phase==='setup')st.innerHTML=`<span class="chip o${viewer()}"></span>${S.mode==='online'?'Both sides deploying':who(S.setupPlayer)+' deploying'} <span class="clock${S.timeLeft<=15?' low':''}" id="hdrClock">${fmt(S.timeLeft)}</span>`;
   else if(S.phase==='play'){
-    const txt=S.mode==='ai'?(S.turn===0?'Your move':`${SIDE[1]} is thinking`)
-      :S.mode==='online'?(S.turn===S.me?'Your move':`${SIDE[S.turn]} is moving`)
-      :`${SIDE[S.turn]} to move`;
+    const txt=S.mode==='ai'?(S.turn===0?'Your move':`${who(1)} is thinking`)
+      :S.mode==='online'?(S.turn===S.me?'Your move':`${who(S.turn)} is moving`)
+      :`${who(S.turn)} to move`;
     st.innerHTML=`<span class="chip o${S.turn}"></span>${txt} <span class="muted">· Turn ${S.moves+1}</span>`;
   }
-  else st.innerHTML=`<span class="chip o${S.winner}"></span>${S.mode==='ai'?(S.winner===0?'Victory':'Defeat'):S.mode==='online'?(S.winner===S.me?'Victory':'Defeat'):SIDE[S.winner]+' wins'}`;
+  else st.innerHTML=`<span class="chip o${S.winner}"></span>${S.mode==='ai'?(S.winner===0?'Victory':'Defeat'):S.mode==='online'?(S.winner===S.me?'Victory':'Defeat'):who(S.winner)+' wins'}`;
 }
 
 function renderBoard(){
@@ -999,7 +1014,7 @@ function renderBoard(){
         const selp=(sel&&sel.id===p.id)||(S.phase==='setup'&&S.preview&&S.preview.x===x&&S.preview.y===y);
         const kills=show&&p.kills?`<span class="kc" title="${p.kills} kill${p.kills>1?'s':''}">${p.kills}</span>`:'';
         inner+=`<span class="pc o${p.owner}${show?'':' hid'}${selp?' selp':''}">${show?face(p.rank):''}${kills}</span>`;
-        label+=show?` ${SIDE[p.owner]} ${NAMES[p.rank]}`:` ${SIDE[p.owner]} piece, rank hidden`;
+        label+=show?` ${who(p.owner)} ${NAMES[p.rank]}`:` ${who(p.owner)} piece, rank hidden`;
         if(kills)label+=`, ${p.kills} kill${p.kills>1?'s':''}`;
       }
       if(showPU&&puAt(x,y)>=0)label+=', glowing power-up square';
@@ -1028,13 +1043,13 @@ function renderPanel(){
     const other=1-v;
     el.innerHTML=`
       <div class="sec">
-        <div class="eyebrow">Deployment · ${SIDE[v]}</div>
+        <div class="eyebrow">Deployment · ${who(v)}</div>
         <div class="timer${S.timeLeft<=15?' low':''}" id="timer">${fmt(S.timeLeft)}</div>
         <p>Tap one of your pieces, then tap another square in your first three rows to swap or move it. The game starts when both sides are ready or the clock runs out.</p>
         <div class="row"><button class="btn" data-act="shuffle" type="button" ${S.ready[v]?'disabled':''}>Shuffle formation</button><button class="btn primary" data-act="ready" type="button" ${S.ready[v]?'disabled':''}>${S.ready[v]?'Waiting for opponent':'Ready'}</button></div>
         <div class="ready-list">
-          <div><span class="chip o${v}"></span>${SIDE[v]} (you)${S.ready[v]?'<span class="ok">Ready</span>':'<span class="no">Deploying</span>'}</div>
-          <div><span class="chip o${other}"></span>${SIDE[other]}${S.ready[other]?`<span class="ok">Ready</span>`:S.mode==='online'?'<span class="no">Deploying</span>':'<span class="no">Waiting for their turn to deploy</span>'}</div>
+          <div><span class="chip o${v}"></span>${who(v)} (you)${S.ready[v]?'<span class="ok">Ready</span>':'<span class="no">Deploying</span>'}</div>
+          <div><span class="chip o${other}"></span>${who(other)}${S.ready[other]?`<span class="ok">Ready</span>`:S.mode==='online'?'<span class="no">Deploying</span>':'<span class="no">Waiting for their turn to deploy</span>'}</div>
         </div>
         ${netLine()}
       </div>
@@ -1045,9 +1060,9 @@ function renderPanel(){
   const sk=S.skills[me],human=isHumanTurn();
   const canBar=human&&!S.barUsed;
   let turnTxt,turnCls='turn';
-  if(S.phase==='over'){turnTxt=S.mode==='local'?`${SIDE[S.winner]} wins`:(S.winner===me?'Victory':'Defeat');turnCls+=S.mode==='local'||S.winner===me?' win':' lose'}
-  else if((S.mode==='ai'||S.mode==='online')&&S.turn!==me){turnTxt=`${SIDE[S.turn]} is moving…`;turnCls+=' wait'}
-  else turnTxt=S.mode==='local'?`${SIDE[S.turn]}'s orders`:'Your orders';
+  if(S.phase==='over'){turnTxt=S.mode==='local'?`${who(S.winner)} wins`:(S.winner===me?'Victory':'Defeat');turnCls+=S.mode==='local'||S.winner===me?' win':' lose'}
+  else if((S.mode==='ai'||S.mode==='online')&&S.turn!==me){turnTxt=`${who(S.turn)} is moving…`;turnCls+=' wait'}
+  else turnTxt=S.mode==='local'?`${who(S.turn)}'s orders`:'Your orders';
   let hint;
   if(S.phase==='over')hint=S.reason+' All ranks and any unexploded mines are now shown.';
   else if(S.mode==='online'&&!netUp())hint='The connection dropped. The game is paused until it comes back.';
@@ -1140,13 +1155,13 @@ function showHandoff(p,kind){
   render();
   const n=S.pending[p].length;
   overlay(`<div class="eyebrow">Pass the device</div>
-    <div class="big-side"><span class="chip o${p}"></span><h2>${SIDE[p]} ${kind==='setup'?'deploys':'to move'}</h2></div>
-    <p>${kind==='setup'?`Keep the screen away from your opponent. Your 90-second deployment clock starts when you tap below.`:`Hand the device to ${SIDE[p]} and make sure ${SIDE[1-p]} is not looking.${n?` You have ${n} new report${n>1?'s':''} from the last turn.`:''}`}</p>
-    <div class="row"><button class="btn primary" type="button" data-act="handoff" data-focus>${kind==='setup'?`Start ${SIDE[p]}'s deployment`:`Show ${SIDE[p]}'s board`}</button></div>`,true);
+    <div class="big-side"><span class="chip o${p}"></span><h2>${who(p)} ${kind==='setup'?'deploys':'to move'}</h2></div>
+    <p>${kind==='setup'?`Keep the screen away from your opponent. Your 90-second deployment clock starts when you tap below.`:`Hand the device to ${who(p)} and make sure ${who(1-p)} is not looking.${n?` You have ${n} new report${n>1?'s':''} from the last turn.`:''}`}</p>
+    <div class="row"><button class="btn primary" type="button" data-act="handoff" data-focus>${kind==='setup'?`Start ${who(p)}'s deployment`:`Show ${who(p)}'s board`}</button></div>`,true);
 }
 function showOver(){
   if(S.phase!=='over')return;
-  const title=S.mode==='local'?`${SIDE[S.winner]} wins`:(S.winner===meSide()?'Victory':'Defeat');
+  const title=S.mode==='local'?`${who(S.winner)} wins`:(S.winner===meSide()?'Victory':'Defeat');
   const on=S.mode==='online';
   overlay(`<div class="eyebrow">Battle over · turn ${S.moves+1}</div>
     <div class="big-side"><span class="chip o${S.winner}"></span><h2 class="${S.mode==='local'||S.winner===meSide()?'win':'lose'}">${title}</h2></div>
@@ -1155,11 +1170,41 @@ function showOver(){
     <div class="row"><button class="btn primary" type="button" data-act="again" data-focus ${on&&!netUp()?'disabled':''}>${on?'Rematch':'Play again'}</button><button class="btn" type="button" data-act="review">Review the board</button><button class="btn" type="button" data-act="${on?'leave':'menu'}">${on?'Leave game':'Main menu'}</button></div>`,false,'over');
 }
 
+/* ---------- player names, asked before every game ---------- */
+// mode: 'ai' (you vs the computer), 'local' (two names), 'host' (your name, then a room opens).
+function showNames(mode){
+  const saved=savedNames();
+  const fields=mode==='local'
+    ?[[0,'Ivory · light pieces, moves first',saved.local0||saved.me||''],[1,'Onyx · dark pieces',saved.local1||'']]
+    :[[0,mode==='ai'?'Your name · you play Ivory':'Your name · you host and play Ivory',saved.me||'']];
+  overlay(`<div class="eyebrow">${mode==='local'?'Pass and play':mode==='ai'?'Play the computer':'Online · create'}</div>
+    <h2>Who's playing?</h2>
+    <p>${mode==='local'?'Enter both names.':'Enter your name.'} ${mode==='ai'?'Your opponent is the Computer.':mode==='host'?'Your friend enters theirs when they join.':''}</p>
+    <form class="names" id="namesForm" data-mode="${mode}" autocomplete="off">
+      ${fields.map(([i,label,val],k)=>`<label class="namefield"><span class="nlabel"><span class="chip o${i}"></span>${label}</span>
+        <input name="n${i}" maxlength="${NAME_MAX}" spellcheck="false" value="${cleanName(val)}" placeholder="${SIDE[i]}" ${k===0?'data-focus':''}></label>`).join('')}
+      <div class="row"><button class="btn primary" type="submit">${mode==='host'?'Create room':'Start game'}</button><button class="btn" type="button" data-act="menu">Back</button></div>
+    </form>`,false,'names');
+}
+function submitNames(form){
+  const mode=form.dataset.mode,el=form.elements;
+  const n0=cleanName(el.n0.value)||SIDE[0];
+  if(mode==='local'){
+    const n1=cleanName(el.n1.value)||SIDE[1];
+    rememberNames({local0:n0,local1:n1});
+    return newGame('local',[n0,n1]);
+  }
+  if(n0!==SIDE[0])rememberNames({me:n0});
+  if(mode==='ai')return newGame('ai',[n0,'Computer']);
+  NET.myName=n0;hostGame();
+}
+
 /* ---------- game lifecycle ---------- */
-function newGame(mode){
+function newGame(mode,names){
   netClose();
   if(S)clearInterval(S.timer);
   S=freshState(mode);
+  if(names)S.names=names;
   formation(0);formation(1);
   closeOverlay();
   if(mode==='ai'){S.ready[1]=true;beginSetup(0)}
@@ -1168,15 +1213,15 @@ function newGame(mode){
 
 function act(a){
   switch(a){
-    case'ai':case'local':newGame(a);break;
+    case'ai':case'local':showNames(a);break;
     case'again':
-      if(S.mode!=='online')newGame(S.mode);
+      if(S.mode!=='online')showNames(S.mode);
       else if(NET.role==='host')newOnlineGame();
       else{send({type:'rematch'});toast('Rematch requested. Starting as soon as the host gets it.','info')}
       break;
-    case'host':hostGame();break;
+    case'host':showNames('host');break;
     case'join':showJoin('','');break;
-    case'rejoin':joinGame(NET.lastCode);break;
+    case'rejoin':joinGame(NET.lastCode,NET.myName);break;
     case'leave':leaveOnline();break;
     case'copy':copyText(NET.code,'Room code copied.');break;
     case'share':shareInvite();break;
@@ -1302,7 +1347,7 @@ function commit(a){
 const PEER_SRC='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
 const ID_PREFIX='game-of-war-';
 const CODE_CHARS='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-const NET={role:null,code:null,lastCode:null};
+const NET={role:null,code:null,lastCode:null,myName:'',guestName:''};
 let peer=null,conn=null,lastSent='';
 function netUp(){return!!(conn&&conn.open)}
 function send(m){if(netUp())try{conn.send(m)}catch(e){}}
@@ -1325,7 +1370,7 @@ function netErrorText(e){
 }
 function netLine(){
   if(S.mode!=='online')return'';
-  return`<div class="netline"><span class="dot ${netUp()?'on':'off'}"></span>Online as ${SIDE[S.me]}${NET.code?` · room ${NET.code}`:''}${netUp()?'':' · disconnected'}</div>`;
+  return`<div class="netline"><span class="dot ${netUp()?'on':'off'}"></span>Online as ${who(S.me)}${NET.code?` · room ${NET.code}`:''}${netUp()?'':' · disconnected'}</div>`;
 }
 function inviteUrl(code){return location.origin+location.pathname+'?join='+code}
 function copyText(text,done){
@@ -1345,7 +1390,7 @@ function viewFor(o){
   const pieces=S.pieces.filter(p=>p.alive&&(p.owner===o||S.phase!=='setup'))
     .map(p=>p.owner===o||over?{...p}:{...p,rank:null,kills:0});
   const v={mode:'online',me:o,phase:S.phase,turn:S.turn,moves:S.moves,winner:S.winner,reason:S.reason,
-    pieces,bars:S.bars,mines:over?S.mines:[],craters:S.craters,powerups:S.powerups,skills:S.skills,
+    names:S.names,pieces,bars:S.bars,mines:over?S.mines:[],craters:S.craters,powerups:S.powerups,skills:S.skills,
     barUsed:S.barUsed,last:S.last,flagPending:S.flagPending,ready:S.ready,timeLeft:S.timeLeft,
     log:S.log.filter(e=>e.vis==='all'||e.vis===o),fallen:o===0?[S.fallen[0],[]]:[[],S.fallen[1]],
     fx:S.fx,sfx:S.sfx,puFresh:S.puFresh,toasts:S.pending[o]};
@@ -1377,7 +1422,7 @@ function lobbyHtml(msg){
     <div class="row"><button class="btn" type="button" data-act="leave">Cancel</button></div>`;
 }
 async function hostGame(){
-  netClose();
+  netClose();NET.guestName='';
   overlay(lobbyHtml('Opening a room…'),false,'lobby');
   try{await loadPeer()}catch(e){return overlay(lobbyHtml('Could not reach the online service. Check your internet connection and try again.'),false,'lobby')}
   const code=makeCode(),p=new window.Peer(peerId(code),{debug:0});
@@ -1398,18 +1443,23 @@ async function hostGame(){
 }
 
 function showJoin(code,msg,busy){
+  const name=cleanName(NET.myName||savedNames().me||'');
   overlay(`<div class="eyebrow">Online · join</div><h2>Join a game</h2>
-    <p>Enter the 6-character room code from your friend, or open the invite link they sent.</p>
+    <p>Enter your name and the 6-character room code from your friend.</p>
     <form class="join" id="joinForm" autocomplete="off">
+      <label class="namefield joinname"><span class="nlabel"><span class="chip o1"></span>Your name · you play Onyx</span>
+        <input id="joinName" name="joinName" maxlength="${NAME_MAX}" spellcheck="false" placeholder="${SIDE[1]}" value="${name}" ${busy?'disabled':''}></label>
       <input id="joinCode" name="joinCode" maxlength="6" inputmode="text" autocapitalize="characters" spellcheck="false" placeholder="CODE" value="${(code||'').replace(/[^A-Z0-9]/gi,'')}" aria-label="Room code" ${busy?'disabled':''}>
       <button class="btn primary" type="submit" ${busy?'disabled':''}>Join</button>
     </form>
     <p class="netmsg">${msg||''}</p>
     <div class="row"><button class="btn" type="button" data-act="leave">Back</button></div>`,false,'join');
-  if(!busy){const i=$('#joinCode');if(i)i.focus()}
+  if(!busy){const i=$(name&&!code?'#joinCode':'#joinName');if(i)i.focus()}
 }
-async function joinGame(raw){
+async function joinGame(raw,rawName){
   const code=String(raw||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  NET.myName=cleanName(rawName);
+  if(NET.myName)rememberNames({me:NET.myName});
   if(code.length!==6)return showJoin(code,'Enter the 6-character room code.');
   netClose();
   NET.lastCode=code;
@@ -1430,10 +1480,10 @@ async function joinGame(raw){
 function onConnected(){
   lastSent='';
   if(NET.role==='host'){
-    if(S.mode==='online'&&(S.phase==='setup'||S.phase==='play')){closeNetOverlay();toast(`${SIDE[1]} reconnected.`,'good');render();sync(true)}
+    if(S.mode==='online'&&(S.phase==='setup'||S.phase==='play')){closeNetOverlay();toast(`${who(1)} reconnected.`,'good');render();sync(true)}
     else newOnlineGame();
   }else{
-    send({type:'hello'});
+    send({type:'hello',name:NET.myName});
     if(!(S.mode==='online'&&S.phase!=='menu'))showJoin(NET.code,'Connected. Waiting for the host to start…',true);
   }
 }
@@ -1442,7 +1492,7 @@ function onClosed(){
   render();
   if(S.phase==='over'){toast('Your opponent left the game.','info');return}
   if(NET.role==='host'){
-    overlay(`<div class="eyebrow">Connection lost</div><h2>${SIDE[1]} disconnected</h2>
+    overlay(`<div class="eyebrow">Connection lost</div><h2>${who(1)} disconnected</h2>
       <p>The game is paused. Your friend can rejoin with room code <b class="code-inline">${NET.code}</b> or the same invite link.</p>
       <div class="row"><button class="btn" type="button" data-act="share">Share invite link again</button><button class="btn" type="button" data-act="leave">Leave game</button></div>`,false,'lost');
   }else{
@@ -1458,8 +1508,12 @@ function onData(m){
     if(m.type==='action'){if(!applyAction(1,m.a))sync(true)}
     else if(m.type==='arrange')hostArrange(m.pos);
     else if(m.type==='ready'){if(S.phase==='setup'&&!S.ready[1])markReady(1)}
-    else if(m.type==='rematch'){if(S.phase==='over'){toast(`${SIDE[1]} started a rematch.`,'info');newOnlineGame()}}
-    else if(m.type==='hello')sync(true);
+    else if(m.type==='rematch'){if(S.phase==='over'){toast(`${who(1)} started a rematch.`,'info');newOnlineGame()}}
+    else if(m.type==='hello'){
+      const name=cleanName(m.name);
+      if(name&&name!==NET.guestName){NET.guestName=name;S.names[1]=name;toast(`${name} is in the room.`,'good');render()}
+      sync(true);
+    }
   }else{
     if(m.type==='state')guestState(m.v);
     else if(m.type==='tick'){if(S.mode==='online'&&S.phase==='setup'){S.timeLeft=m.t;tickClock()}}
@@ -1480,22 +1534,24 @@ function hostArrange(pos){
 function newOnlineGame(){
   if(S)clearInterval(S.timer);
   S=freshState('online');S.me=0;
+  S.names=[NET.myName||SIDE[0],NET.guestName||SIDE[1]];
   formation(0);formation(1);
   closeOverlay();
   beginSetup(0);
-  toast(`${SIDE[1]} joined. Deploy your army; you share one 90-second clock.`,'good');
+  toast(`${NET.guestName||'Your friend'} joined. Deploy your army; you share one 90-second clock.`,'good');
 }
 function guestState(v){
   const prev=S;
   const wasOnline=prev&&prev.mode==='online';
   const next={...freshState('online'),...v,busy:false,timer:null};
+  next.names=[0,1].map(i=>cleanName(v.names&&v.names[i])||SIDE[i]);
   if(wasOnline&&prev.phase===v.phase&&prev.turn===v.turn&&prev.moves===v.moves){next.selected=prev.selected;next.tool=prev.tool;next.preview=prev.preview}
   if(wasOnline&&prev.phase==='setup'&&v.phase==='setup'){next.pieces=prev.pieces;next.ready=[v.ready[0],prev.ready[1]||v.ready[1]]}
   S=next;
   closeNetOverlay();
   if(!wasOnline||prev.phase!==v.phase){
     if(v.phase==='setup'){closeOverlay();toast('You play Onyx. Deploy your army; you share one 90-second clock.','info')}
-    else if(v.phase==='play'){closeOverlay();toast(`Battle begins. ${SIDE[0]} moves first.`,'info')}
+    else if(v.phase==='play'){closeOverlay();toast(`Battle begins. ${who(0)} moves first.`,'info')}
     else if(v.phase==='over')setTimeout(showOver,1000);
   }
   (v.toasts||[]).forEach(t=>toast(t.text,t.kind));
@@ -1509,14 +1565,18 @@ function leaveOnline(){
   render();showMenu();
 }
 
-$('#card').addEventListener('submit',e=>{e.preventDefault();if(e.target.id==='joinForm')joinGame($('#joinCode').value)});
+$('#card').addEventListener('submit',e=>{
+  e.preventDefault();
+  if(e.target.id==='joinForm')joinGame($('#joinCode').value,$('#joinName').value);
+  else if(e.target.id==='namesForm')submitNames(e.target);
+});
 $('#card').addEventListener('input',e=>{if(e.target.id==='joinCode')e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'')});
 
 /* Opening view: a sample deployment behind the menu, or straight into a join from an invite link */
 S=freshState('ai');formation(0);formation(1);
 render();
 const invite=new URLSearchParams(location.search).get('join');
-if(invite){history.replaceState(null,'',location.pathname);joinGame(invite)}
+if(invite){history.replaceState(null,'',location.pathname);showJoin(invite,'Enter your name, then tap Join.')}
 else showMenu();
 })();
 </script>
