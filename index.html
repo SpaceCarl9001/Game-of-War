@@ -258,6 +258,15 @@ button{font:inherit;color:inherit}
 .join input:focus{outline:2px solid var(--brass-hi);outline-offset:1px}
 .join input::placeholder{color:var(--muted);opacity:.6}
 .card p.netmsg{color:var(--ink)}
+/* Computer difficulty */
+.levels{border:0;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.levels legend{font-size:13px;color:var(--muted);margin-bottom:6px;padding:0}
+.level{position:relative;display:grid;gap:2px;padding:10px 12px;border:1px solid var(--line);border-radius:4px;background:var(--panel-2);cursor:pointer}
+.level input{position:absolute;opacity:0;pointer-events:none}
+.level b{font:600 17px var(--f-ui);letter-spacing:.04em;text-transform:uppercase}
+.level span{font-size:13px;color:var(--muted)}
+.level:has(input:checked){border-color:var(--brass-hi);box-shadow:inset 0 0 0 1px var(--brass-hi)}
+.level:has(input:focus-visible){outline:2px solid var(--brass-hi);outline-offset:1px}
 /* Surrender */
 .btn.surrender{margin-top:10px;width:100%;background:transparent;border:1px dashed var(--line);color:var(--muted);font-size:13px;padding:8px 10px}
 .btn.surrender:hover:not(:disabled){color:var(--ember);border-color:var(--ember)}
@@ -332,7 +341,7 @@ const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
 
 let S;
 function freshState(mode){
-  return {mode,phase:'menu',names:[SIDE[0],SIDE[1]],pieces:[],bars:[],mines:[],craters:[],powerups:[],turn:0,
+  return {mode,phase:'menu',names:[SIDE[0],SIDE[1]],aiLevel:'normal',obs:[],start:null,aiHist:[[],[]],pieces:[],bars:[],mines:[],craters:[],powerups:[],turn:0,
     skills:[{h:2,v:2,air:1},{h:2,v:2,air:1}],barUsed:false,tool:'move',selected:null,preview:null,
     log:[],pending:[[],[]],flagPending:null,winner:null,reason:'',setupPlayer:0,ready:[false,false],
     timeLeft:SETUP_SECS,timer:null,moves:0,last:null,fx:[],puFresh:false,safe:new Set(),nextId:1,
@@ -433,6 +442,7 @@ function startPlay(){
   clearInterval(S.timer);
   S.phase='play';S.turn=0;S.moves=0;S.preview=null;
   S.pieces.forEach(p=>S.safe.add(key(p.x,p.y)));
+  S.start=Object.fromEntries(S.pieces.map(p=>[p.id,{x:p.x,y:p.y}])); // starting squares, visible to both
   const band=[];for(let y=3;y<=6;y++)for(let x=0;x<N;x++)band.push({x,y});
   S.mines=shuffle(band).slice(0,MINES);
   spawnPowerups(POWERUPS);
@@ -515,6 +525,9 @@ function doMove(p,x,y){
 function resolveBattle(a,d,x,y){
   const A=a.owner,D=d.owner,at=sq(x,y),ar=a.rank,dr=d.rank;
   const out=battle(ar,dr);
+  // What both players witnessed: who fought whom, on which square, and who survived. The computer reads
+  // only its own piece's rank from this (aiIntel); the other rank is never used.
+  (S.obs||=[]).push({aId:a.id,dId:d.id,aOwner:A,ar,dr,out,pu:puAt(x,y)>=0}); // ||= : games saved before this existed
   fx(x,y,'clash');sfx('battle',{out,A,D});
   let winner=null,loserRank=null;
   if(out==='a'){kill(d);a.x=x;a.y=y;S.safe.add(key(x,y));winner=a;loserRank=dr}
@@ -624,12 +637,18 @@ function finish(w,reason){
 function aiTurn(){
   S.busy=false;
   if(S.phase!=='play'||S.turn!==1)return;
-  const me=1;
+  const me=1,L=AI_LEVELS[S.aiLevel];
   aiMaybeBarricade(me);
-  const t=aiPickStrike(me);
-  if(t){airStrike(me,t);endTurn();return}
-  const mv=aiPickMove(me);
-  if(mv){doMove(mv.p,mv.x,mv.y);endTurn();return}
+  if(L){
+    const a=aiSmartTurn(me,L);
+    if(a&&a.type==='air'){airStrike(me,getPiece(a.id));endTurn();return}
+    if(a){doMove(getPiece(a.id),a.x,a.y);endTurn();return}
+  }else{
+    const t=aiPickStrike(me);
+    if(t){airStrike(me,t);endTurn();return}
+    const mv=aiPickMove(me);
+    if(mv){doMove(mv.p,mv.x,mv.y);endTurn();return}
+  }
   finish(0,`${who(1)} has no legal moves left.`);
 }
 function aiMaybeBarricade(me){
@@ -685,6 +704,222 @@ function aiPickMove(me){
     if(!best||s>best.s)best={p,x:m.x,y:m.y,s};
   }
   return best;
+}
+
+/* ---------- stronger computer opponent (Normal and Hard) ----------
+   Fair play: it never reads an enemy rank or a mine position. It keeps a belief about each enemy piece's
+   rank, built only from what a human player sees: the battles that piece fought (which of our own ranks it
+   met and whether it won, lost or both fell), where it started, whether it has moved or attacked, and the
+   power-ups and kills it has collected. Every move is then scored by expected value. */
+const AI_LEVELS={
+  easy:null, // the original rule-of-thumb opponent above
+  normal:{temp:.9,risk:.55,airFlag:.6,hunt:.25,push:.12,decoys:3,smartSetup:true},
+  hard:{temp:.15,risk:.8,airFlag:.35,hunt:.35,push:.15,decoys:5,smartSetup:true},
+};
+const VAL=[0,1,1.4,1.8,2.2,2.6,3,3.5,4.2,5,6,7,8.5,10,6.5]; // material value of each rank (FLAG handled as WIN)
+const WIN=60;
+const promotable=r=>r!==FLAG&&r!==SPY&&r!==G5;
+const promoted=(r0,s)=>promotable(r0)?Math.min(r0+s,G5):r0;
+const worth=r=>r===FLAG?WIN:VAL[r];
+const COMP=(()=>{const c=new Array(15).fill(0);ARMY.forEach(r=>c[r]++);return c})();
+
+/** Belief over each living enemy piece's current rank: Map(id -> 15 probabilities). */
+function aiIntel(me){
+  const foe=1-me,enemies=S.pieces.filter(p=>p.owner===foe);
+  const W=new Map(),shift=new Map(),kills=new Map(),attacked=new Set();
+  const back=foe===0?0:N-1;
+  for(const e of enemies){
+    const w=COMP.map(c=>c?1:0);
+    // Flag cues: players tend to hide the flag on the back row and leave it still.
+    const st=S.start&&S.start[e.id],row=st?Math.abs(st.y-back):0;
+    w[FLAG]*=row===0?1:row===1?.35:.15;
+    if(e.moved)w[FLAG]*=.08;
+    if(!e.alive)w[FLAG]=0; // the game would have ended
+    W.set(e.id,w);shift.set(e.id,0);kills.set(e.id,0);
+  }
+  for(const o of S.obs||[]){
+    const mineAttacked=o.aOwner===me,eid=mineAttacked?o.dId:o.aId,w=W.get(eid);
+    if(!w)continue;
+    const myRank=mineAttacked?o.ar:o.dr,s=shift.get(eid);
+    if(!mineAttacked)attacked.add(eid);
+    const keep=w.slice();
+    for(let r0=0;r0<15;r0++){
+      if(!w[r0])continue;
+      const x=promoted(r0,s);
+      if((mineAttacked?battle(myRank,x):battle(x,myRank))!==o.out)w[r0]=0;
+    }
+    if(!w.some(v=>v>0))w.splice(0,15,...keep); // contradiction (rare special promotions): ignore this battle
+    const enemyWon=mineAttacked?o.out==='d':o.out==='a';
+    if(enemyWon){
+      const k=kills.get(eid)+1;kills.set(eid,k);
+      shift.set(eid,s+(o.pu?1:0)+(k%VET===0?1:0));
+    }
+  }
+  attacked.forEach(id=>{W.get(id)[FLAG]*=.02}); // a flag almost never attacks
+  // Make the beliefs agree with the known army make-up (1 flag, 6 privates, 2 spies, one of each other rank).
+  const ids=enemies.map(e=>e.id);
+  const M=ids.map(id=>{const w=W.get(id);return w.some(v=>v>0)?w.slice():COMP.map(c=>c?1:0)});
+  for(let it=0;it<40;it++){
+    for(const row of M){const s=row.reduce((a,b)=>a+b,0)||1;for(let r=0;r<15;r++)row[r]/=s}
+    for(let r=0;r<15;r++){const s=M.reduce((a,row)=>a+row[r],0);if(s>0){const f=COMP[r]/s;for(const row of M)row[r]*=f}}
+  }
+  const belief=new Map();
+  ids.forEach((id,i)=>{
+    const e=getPiece(id);if(!e.alive)return;
+    const row=M[i],tot=row.reduce((a,b)=>a+b,0)||1,s=shift.get(id),b=new Array(15).fill(0);
+    row.forEach((p,r0)=>{if(p)b[promoted(r0,s)]+=p/tot});
+    belief.set(id,b);
+  });
+  return{belief,cache:new Map()};
+}
+
+/** Expected result of our rank `r` attacking a piece with belief `b`. */
+function attackEV(r,b,{pu=false,vet=false}={}){
+  let ev=0,pWin=0,pTie=0;
+  for(let x=0;x<15;x++){
+    const p=b[x];if(!p)continue;
+    const out=battle(r,x);
+    if(out==='a'){ev+=p*worth(x);pWin+=p}
+    else if(out==='d')ev-=p*worth(r);
+    else{ev+=p*(worth(x)-worth(r));pTie+=p}
+  }
+  if(promotable(r)){const up=VAL[Math.min(r+1,G5)]-VAL[r];if(pu)ev+=pWin*up;if(vet)ev+=pWin*up}
+  return{ev,pWin,pTie};
+}
+/** Chance that at least one adjacent enemy would beat our rank `r` standing at (x,y) if it attacked. */
+function exposure(me,intel,x,y,r,skipId){
+  let safe=1;
+  for(const[dx,dy]of DIRS){
+    const q=pieceAt(x+dx,y+dy);
+    if(!q||q.owner===me||q.id===skipId)continue;
+    const b=intel.belief.get(q.id);if(!b)continue;
+    let pLose=0;
+    for(let k=0;k<15;k++){if(!b[k])continue;const out=battle(k,r);if(out==='a')pLose+=b[k];else if(out==='both')pLose+=b[k]*.5}
+    safe*=1-pLose*.7; // not every threatened piece gets attacked
+  }
+  return 1-safe;
+}
+/** Chance an unexplored square in rows 4-7 hides one of the remaining mines (public: count and craters). */
+function mineRisk(x,y){
+  if(y<3||y>6||S.safe.has(key(x,y))||S.craters.some(c=>c.x===x&&c.y===y))return 0;
+  const left=MINES-S.craters.filter(c=>c.y>=3&&c.y<=6).length;
+  if(left<=0)return 0;
+  let unknown=0;
+  for(let yy=3;yy<=6;yy++)for(let xx=0;xx<N;xx++)if(!S.safe.has(key(xx,yy))&&!barAt(xx,yy)&&!S.craters.some(c=>c.x===xx&&c.y===yy))unknown++;
+  return unknown?Math.min(1,left/unknown):0;
+}
+/** Chance our flag at `pos` is taken next turn (any enemy piece captures a flag; they don't know which piece it is). */
+function flagDanger(me,pos,removeId){
+  let q=1;
+  for(const[dx,dy]of DIRS){const e=pieceAt(pos.x+dx,pos.y+dy);if(e&&e.owner!==me&&e.id!==removeId)q*=.45}
+  return 1-q;
+}
+/** How attractive the best reachable target is from `pos` for our rank `r` (closer is better). */
+function huntValue(me,intel,r,pos,f){
+  if(r===FLAG)return 0;
+  let best=0;
+  for(const e of alive(1-me)){
+    const ck=r+':'+e.id;
+    let ev=intel.cache.get(ck);
+    if(ev===undefined){ev=attackEV(r,intel.belief.get(e.id)).ev;intel.cache.set(ck,ev)}
+    if(ev<=0)continue;
+    const urgent=f&&dist(e,f)<=3?2:1;
+    best=Math.max(best,ev*urgent/(1+dist(pos,e)));
+  }
+  return best;
+}
+function scoreMove(me,intel,p,m,L){
+  const r=p.rank,f=flagOf(me),foes=alive(1-me);
+  const tgt=m.attack?pieceAt(m.x,m.y):null;
+  let s=0,flagAfter=f?flagDanger(me,f):0;
+  if(tgt){
+    const b=intel.belief.get(tgt.id);
+    const a=attackEV(r,b,{pu:puAt(m.x,m.y)>=0,vet:((p.kills||0)+1)%VET===0});
+    s+=a.ev;
+    if(r<=SGT&&r!==FLAG)s+=1.2*(1-Math.max(...b)); // a cheap probe that reveals an unknown piece is worth it
+    s-=a.pWin*exposure(me,intel,m.x,m.y,r,tgt.id)*worth(r)*L.risk;
+    if(f&&r!==FLAG){const rm=a.pWin+a.pTie;flagAfter=rm*flagDanger(me,f,tgt.id)+(1-rm)*flagAfter}
+  }else{
+    s-=mineRisk(m.x,m.y)*worth(r);
+    const before=exposure(me,intel,p.x,p.y,r),after=exposure(me,intel,m.x,m.y,r);
+    s-=(after-before)*(r===FLAG?WIN*.5:worth(r))*L.risk;
+    // Press forward and hunt, more so the longer the battle drags on.
+    const drive=1+S.moves/150;
+    s+=L.hunt*drive*(huntValue(me,intel,r,m,f)-huntValue(me,intel,r,p,f));
+    if(r!==FLAG)s+=L.push*drive*(m.y-p.y)*(me===0?1:-1);
+    if(r===FLAG){
+      flagAfter=flagDanger(me,m);
+      s-=1.5; // a moving flag gives itself away
+      if(m.y===farRow(me)&&!foes.some(e=>dist(e,m)===1))s+=WIN;
+    }
+    // stay beside the flag while enemies are close
+    if(f&&r!==FLAG&&foes.some(e=>dist(e,f)<=3)&&dist(p,f)===1&&dist(m,f)>1)s-=1.2;
+    // don't shuffle back and forth
+    const h=S.aiHist[me];if(h.some(q=>q.id===p.id&&q.x===m.x&&q.y===m.y))s-=.6;
+    // keep decoys: still pieces near the back hide which one is the flag (from air strikes too)
+    if(L.decoys&&r!==FLAG&&!p.moved&&f&&Math.abs(p.y-f.y)<=1){
+      const still=alive(me).filter(q=>q.rank!==FLAG&&!q.moved&&Math.abs(q.y-f.y)<=1).length;
+      if(still<=L.decoys)s-=2.5;
+    }
+  }
+  s-=flagAfter*WIN*.35;
+  return s;
+}
+const gumbel=()=>-Math.log(-Math.log(Math.random()*.999999+1e-6));
+function aiSmartStrike(me,intel,L){
+  if(!S.skills[me].air)return null;
+  const foes=alive(1-me);if(!foes.length)return null;
+  const f=flagOf(me);
+  // Emergency: an enemy next to our flag that no move reliably removes.
+  if(f){
+    const adj=foes.filter(e=>dist(e,f)===1);
+    for(const e of adj){
+      const b=intel.belief.get(e.id);
+      const answer=alive(me).some(p=>p!==f&&dist(p,e)===1&&attackEV(p.rank,b).pWin>.8);
+      const escape=legalMoves(f).some(m=>!m.attack&&flagDanger(me,m)===0&&mineRisk(m.x,m.y)===0);
+      if(!answer&&!escape)return e;
+    }
+  }
+  // A confident shot at the enemy flag wins the game outright.
+  let best=null,bp=0;
+  for(const e of foes){const p=intel.belief.get(e.id)[FLAG];if(p>bp){bp=p;best=e}}
+  const need=foes.length<=7?L.airFlag-.12:L.airFlag;
+  if(best&&bp>=need)return best;
+  return null;
+}
+/** Normal / Hard turn: an action object for applyAction, plus an optional barricade first. */
+function aiSmartTurn(me,L){
+  const intel=aiIntel(me);
+  const strike=aiSmartStrike(me,intel,L);
+  if(strike)return{type:'air',id:strike.id};
+  let best=null;
+  for(const p of alive(me))for(const m of legalMoves(p)){
+    const s=scoreMove(me,intel,p,m,L)+gumbel()*L.temp;
+    if(!best||s>best.s)best={p,m,s};
+  }
+  if(!best)return null;
+  const h=S.aiHist[me];h.push({id:best.p.id,x:best.p.x,y:best.p.y});if(h.length>4)h.shift();
+  return{type:'move',id:best.p.id,x:best.m.x,y:best.m.y};
+}
+/** Deployment for Normal / Hard: flag on the back row with solid guards beside it, privates up front. */
+function aiFormation(o){
+  const back=o===0?0:N-1,fwd=o===0?1:-1,front=back+2*fwd;
+  const pieces=alive(o),byRank=r=>pieces.filter(p=>p.rank===r&&!p.placed);
+  const taken=new Set(),put=(p,x,y)=>{p.x=x;p.y=y;p.placed=true;taken.add(key(x,y))};
+  // Usually the back row, sometimes one row up, so the flag's square isn't predictable.
+  const flagX=rnd(N),flagY=Math.random()<.7?back:back+fwd;
+  put(byRank(FLAG)[0],flagX,flagY);
+  const guards=shuffle([6,7,8,9,SPY]);
+  const around=[[flagX-1,flagY],[flagX+1,flagY],[flagX,flagY+fwd],[flagX,flagY-fwd]]
+    .filter(([x,y])=>x>=0&&x<N&&homeRows(o).includes(y)&&y!==front).slice(0,3);
+  around.forEach(([x,y])=>{const r=guards.shift();const p=byRank(r)[0];if(p)put(p,x,y)});
+  const frontCells=shuffle([...Array(N).keys()].filter(x=>!taken.has(key(x,front))));
+  const frontRanks=shuffle([PVT,PVT,PVT,PVT,rnd(2)?10:11]);
+  frontRanks.forEach((r,i)=>{const p=byRank(r)[0];if(p&&frontCells[i]!==undefined)put(p,frontCells[i],front)});
+  const rest=pieces.filter(p=>!p.placed);
+  const free=shuffle(homeRows(o).flatMap(y=>[...Array(N).keys()].map(x=>({x,y}))).filter(c=>!taken.has(key(c.x,c.y))));
+  rest.forEach((p,i)=>put(p,free[i].x,free[i].y));
+  pieces.forEach(p=>delete p.placed);
 }
 
 /* ---------- messaging ---------- */
@@ -1149,7 +1384,7 @@ function showMenu(){
     ${online?'':'<p>You are offline. Online games need an internet connection; the modes below work offline.</p>'}
     <div class="eyebrow">Offline</div>
     <div class="modes">
-      <button class="btn mode" type="button" data-act="ai"><b>Play the computer</b><span>You command Ivory against a bot. No internet needed.</span></button>
+      <button class="btn mode" type="button" data-act="ai"><b>Play the computer</b><span>Easy, Normal or Hard. No internet needed.</span></button>
       <button class="btn mode" type="button" data-act="local"><b>Pass and play</b><span>Two players on one device, with a hand-off screen between turns.</span></button>
     </div>
     ${inGame?'<div class="row"><button class="btn" type="button" data-act="resume">Resume current game</button></div>':S.phase==='menu'&&loadSave()?'<div class="row"><button class="btn" type="button" data-act="restore">Resume saved game</button></div>':''}
@@ -1204,6 +1439,10 @@ function showNames(mode){
     <form class="names" id="namesForm" data-mode="${mode}" autocomplete="off">
       ${fields.map(([i,label,val],k)=>`<label class="namefield"><span class="nlabel"><span class="chip o${i}"></span>${label}</span>
         <input name="n${i}" maxlength="${NAME_MAX}" spellcheck="false" value="${cleanName(val)}" placeholder="${SIDE[i]}" ${k===0?'data-focus':''}></label>`).join('')}
+      ${mode==='ai'?`<fieldset class="levels"><legend>Computer difficulty</legend>
+        ${[['easy','Easy','Plays by simple habits'],['normal','Normal','Reads the battle, makes some mistakes'],['hard','Hard','Tracks every clue, plays sharp']]
+          .map(([v,t,d])=>`<label class="level"><input type="radio" name="level" value="${v}" ${(saved.level||'normal')===v?'checked':''}><b>${t}</b><span>${d}</span></label>`).join('')}
+      </fieldset>`:''}
       <div class="row"><button class="btn primary" type="submit">${mode==='host'?'Create room':'Start game'}</button><button class="btn" type="button" data-act="menu">Back</button></div>
     </form>`,false,'names');
 }
@@ -1216,17 +1455,23 @@ function submitNames(form){
     return newGame('local',[n0,n1]);
   }
   if(n0!==SIDE[0])rememberNames({me:n0});
-  if(mode==='ai')return newGame('ai',[n0,'Computer']);
+  if(mode==='ai'){
+    const level=['easy','normal','hard'].includes(el.level&&el.level.value)?el.level.value:'normal';
+    rememberNames({level});
+    return newGame('ai',[n0,'Computer'],level);
+  }
   NET.myName=n0;hostGame();
 }
 
 /* ---------- game lifecycle ---------- */
-function newGame(mode,names){
+function newGame(mode,names,level){
   netClose();
   if(S)clearInterval(S.timer);
   S=freshState(mode);
   if(names)S.names=names;
+  if(level)S.aiLevel=level;
   formation(0);formation(1);
+  if(mode==='ai'&&AI_LEVELS[S.aiLevel]&&AI_LEVELS[S.aiLevel].smartSetup)aiFormation(1);
   closeOverlay();
   if(mode==='ai'){S.ready[1]=true;beginSetup(0)}
   else showHandoff(0,'setup');
