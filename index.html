@@ -258,6 +258,40 @@ button{font:inherit;color:inherit}
 .join input:focus{outline:2px solid var(--brass-hi);outline-offset:1px}
 .join input::placeholder{color:var(--muted);opacity:.6}
 .card p.netmsg{color:var(--ink)}
+/* Chess clocks */
+.clocks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.tc{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--panel-2);opacity:.65}
+.tc .chip{width:12px;height:12px;border-radius:3px;flex:none}
+.tc .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.tc b{font:600 22px/1 var(--f-mono,ui-monospace),monospace;font-variant-numeric:tabular-nums}
+.tc.on{opacity:1;border-color:var(--brass-hi);box-shadow:inset 0 0 0 1px var(--brass-hi)}
+.tc.low b,.clock.mini.low b{color:var(--ember)}
+.tc.on.low{border-color:var(--ember);box-shadow:inset 0 0 0 1px var(--ember)}
+.clock.mini b{font-variant-numeric:tabular-nums}
+/* Pre-move: the queued piece and its target square */
+.sq.pmp .pc{outline:2px dashed var(--teal,#4fd1c5);outline-offset:1px}
+.sq.pmt{box-shadow:inset 0 0 0 3px var(--teal,#4fd1c5)}
+.sq.pmt::after{content:"";position:absolute;inset:34%;border-radius:50%;border:2px dashed var(--teal,#4fd1c5);z-index:3;pointer-events:none}
+/* Emotes */
+.row.tight{gap:8px;margin-top:10px}
+.row.tight .btn{flex:1 1 0;margin-top:0}
+.btn.emote-btn{font-size:13px;padding:8px 10px}
+.emotes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
+.emotes .emo{font-size:24px;line-height:1;padding:8px 0;background:var(--panel-2);border:1px solid var(--line);border-radius:4px;color:var(--ink);cursor:pointer}
+.emotes .emo.words{grid-column:span 2;font:600 14px/1.2 var(--f-ui);letter-spacing:.03em;padding:10px 6px}
+.emotes .emo:hover{border-color:var(--brass-hi)}
+.toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:10px;cursor:pointer;grid-column:1/-1}
+.toggle input{accent-color:var(--brass-hi);width:16px;height:16px}
+.bubble{position:absolute;left:50%;z-index:20;height:max-content;width:max-content;max-width:80%;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 14px 10px;
+  border-radius:14px;background:var(--panel);border:1px solid var(--brass-hi);box-shadow:0 10px 30px rgba(0,0,0,.5);pointer-events:none;
+  animation:bubbleIn .25s ease-out,bubbleOut .4s ease-in 2.8s forwards}
+.bubble.theirs{top:5%;transform:translateX(-50%)} .bubble.mine{top:70%;transform:translateX(-50%)}
+.bubble .who{font:600 12px var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.bubble .emo{font-size:42px;line-height:1.1}
+.bubble.words .emo{font:600 22px/1.2 var(--f-ui);letter-spacing:.02em;color:var(--ink)}
+.bubble.o1{border-color:var(--onyx-edge,#5b8fb9)}
+@keyframes bubbleIn{from{opacity:0;margin-top:12px}to{opacity:1;margin-top:0}}
+@keyframes bubbleOut{to{opacity:0}}
 /* Computer difficulty */
 .levels{border:0;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
 .levels legend{font-size:13px;color:var(--muted);margin-bottom:6px;padding:0}
@@ -341,7 +375,7 @@ const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
 
 let S;
 function freshState(mode){
-  return {mode,phase:'menu',names:[SIDE[0],SIDE[1]],aiLevel:'normal',obs:[],start:null,aiHist:[[],[]],pieces:[],bars:[],mines:[],craters:[],powerups:[],turn:0,
+  return {mode,phase:'menu',names:[SIDE[0],SIDE[1]],aiLevel:'normal',obs:[],start:null,aiHist:[[],[]],tc:null,premove:null,pieces:[],bars:[],mines:[],craters:[],powerups:[],turn:0,
     skills:[{h:2,v:2,air:1},{h:2,v:2,air:1}],barUsed:false,tool:'move',selected:null,preview:null,
     log:[],pending:[[],[]],flagPending:null,winner:null,reason:'',setupPlayer:0,ready:[false,false],
     timeLeft:SETUP_SECS,timer:null,moves:0,last:null,fx:[],puFresh:false,safe:new Set(),nextId:1,
@@ -449,8 +483,9 @@ function startPlay(){
   log('Both armies are deployed. Two land mines lie hidden somewhere in rows 4 to 7.');
   log(`${who(0)} moves first.`);
   sfx('start');
+  if(S.tc)S.tc.since=null;
   if(S.mode==='local')showHandoff(0,'play');
-  else{closeOverlay();render();toast('Battle begins. You move first.','info')}
+  else{tcResume();closeOverlay();render();toast('Battle begins. You move first.','info')}
 }
 
 /* ---------- power-ups ---------- */
@@ -528,7 +563,7 @@ function resolveBattle(a,d,x,y){
   // What both players witnessed: who fought whom, on which square, and who survived. The computer reads
   // only its own piece's rank from this (aiIntel); the other rank is never used.
   (S.obs||=[]).push({aId:a.id,dId:d.id,aOwner:A,ar,dr,out,pu:puAt(x,y)>=0}); // ||= : games saved before this existed
-  fx(x,y,'clash');sfx('battle',{out,A,D});
+  fx(x,y,'clash');sfx('battle',{out,A,D});aiReact(out,A);
   let winner=null,loserRank=null;
   if(out==='a'){kill(d);a.x=x;a.y=y;S.safe.add(key(x,y));winner=a;loserRank=dr}
   else if(out==='d'){kill(a);winner=d;loserRank=ar}
@@ -608,6 +643,7 @@ function airStrikeBar(owner,x,y){
 
 function endTurn(){
   if(S.phase!=='play'){render();return}
+  if(S.tc){tcBank();S.tc.left[S.turn]+=S.tc.inc}
   S.moves++;
   spawnPowerups(S.powerups.length);
   S.selected=null;S.tool='move';S.preview=null;S.barUsed=false;
@@ -620,13 +656,16 @@ function endTurn(){
   }
   if(!hasAction(t))return finish(1-t,`${who(t)} has no legal moves left.`);
   if(S.mode==='local'){showHandoff(t,'play');return}
+  tcResume();
   render();
   if(S.mode==='ai'&&t===1){S.busy=true;renderStatus();renderPanel();setTimeout(aiTurn,700+rnd(500))}
+  if(t===meSide()&&(S.mode==='ai'||(S.mode==='online'&&NET.role==='host')))schedulePremove();
 }
 
 function finish(w,reason){
   sfx('over',{w});
-  S.phase='over';S.winner=w;S.reason=reason;S.tool='move';S.selected=null;S.preview=null;S.busy=false;S.handoff=null;
+  tcBank();
+  S.phase='over';S.winner=w;S.reason=reason;S.tool='move';S.selected=null;S.preview=null;S.busy=false;S.handoff=null;S.premove=null;
   clearInterval(S.timer);
   log(reason,'all','win');
   closeOverlay();render();
@@ -1177,7 +1216,8 @@ function loadSave(){
   try{
     const o=JSON.parse(localStorage.getItem(SAVE_KEY));
     if(!o||o.phase!=='play')return null;
-    o.safe=new Set(o.safe);o.busy=false;o.fx=[];
+    o.safe=new Set(o.safe);o.busy=false;o.fx=[];o.premove=null;
+    if(o.tc)o.tc.since=null; // the clock doesn't run while the app was closed
     return o;
   }catch(e){return null}
 }
@@ -1187,7 +1227,7 @@ function resumeSaved(){
   if(S)clearInterval(S.timer);
   S=o;closeOverlay();
   if(S.handoff)showHandoff(S.handoff.p,S.handoff.kind);
-  else render();
+  else{tcResume();render()}
   if(S.mode==='ai'&&S.turn===1){S.busy=true;renderStatus();renderPanel();setTimeout(aiTurn,600)}
 }
 
@@ -1199,7 +1239,7 @@ function renderStatus(){
     const txt=S.mode==='ai'?(S.turn===0?'Your move':`${who(1)} is thinking`)
       :S.mode==='online'?(S.turn===S.me?'Your move':`${who(S.turn)} is moving`)
       :`${who(S.turn)} to move`;
-    st.innerHTML=`<span class="chip o${S.turn}"></span>${txt} <span class="muted">· Turn ${S.moves+1}</span>`;
+    st.innerHTML=`<span class="chip o${S.turn}"></span>${txt} <span class="muted">· Turn ${S.moves+1}</span>${S.tc?` <span class="clock mini" data-clock="${S.turn}"><b>${fmtClock(tcLeft(S.turn))}</b></span>`:''}`;
   }
   else st.innerHTML=`<span class="chip o${S.winner}"></span>${S.mode==='ai'?(S.winner===0?'Victory':'Defeat'):S.mode==='online'?(S.winner===S.me?'Victory':'Defeat'):who(S.winner)+' wins'}`;
 }
@@ -1233,6 +1273,10 @@ function renderBoard(){
         if(S.last.to.x===x&&S.last.to.y===y)cls.push('lt',who);
       }
       const m=moves.get(k);if(m)cls.push(m.attack?'atk':'mv');
+      if(S.premove&&S.phase==='play'){
+        if(S.premove.x===x&&S.premove.y===y)cls.push('pmt');
+        const pp=getPiece(S.premove.id);if(pp&&pp.x===x&&pp.y===y)cls.push('pmp');
+      }
       if(barMode&&validBar(barCells(x,y,S.tool,v)))cls.push('can');
       if(prev.some(q=>q.x===x&&q.y===y))cls.push('prev');
       let p=pieceAt(x,y);
@@ -1306,6 +1350,8 @@ function renderPanel(){
   if(S.phase==='over')hint=S.reason+' All ranks and any unexploded mines are now shown.';
   else if(S.mode==='online'&&!netUp())hint='The connection dropped. The game is paused until it comes back.';
   else if(S.busy&&S.mode==='online'&&S.turn===me)hint='Sending your orders…';
+  else if(!human&&S.premove){const pp=getPiece(S.premove.id);hint=`Pre-move queued: ${pp?sq(pp.x,pp.y):''} → ${sq(S.premove.x,S.premove.y)}. It plays as soon as your turn starts, if it's still possible. Tap it again to cancel.`}
+  else if(!human&&canPremove())hint='Enemy is moving. You can queue a pre-move: tap one of your pieces, then a square next to it.';
   else if(!human)hint='Wait for the enemy to finish their turn.';
   else if(S.tool==='barH'||S.tool==='barV')hint=`Tap a highlighted square to preview, then tap it again to build. The barricade covers that square and the one ${S.tool==='barH'?'to its right':'below it'}. You still move afterwards.`;
   else if(S.tool==='air')hint='Tap an enemy piece or a barricade square to aim, then tap it again to fire. The strike ends your turn.';
@@ -1318,8 +1364,16 @@ function renderPanel(){
     <div class="sec">
       <div class="${turnCls}">${turnTxt}</div>
       <div class="counts"><span>Your pieces <b>${alive(me).length}</b></span><span>Enemy pieces <b>${alive(1-me).length}</b></span><span>Power-ups <b>${S.powerups.length}</b></span></div>
+      ${S.tc?`<div class="clocks">${[0,1].map(o=>`<div class="tc o${o}${S.phase==='play'&&S.turn===o?' on':''}${(tcLeft(o)??1)<=20000?' low':''}" data-clock="${o}"><span class="chip o${o}"></span><span class="nm">${who(o)}</span><b>${fmtClock(tcLeft(o))}</b></div>`).join('')}</div>`:''}
       ${netLine()}
-      ${S.phase==='play'?`<button class="btn surrender" type="button" data-act="surrender" ${S.mode==='online'&&!netUp()?'disabled':''}><span aria-hidden="true">⚐&#xFE0E;</span> Surrender</button>`:''}
+      <div class="row tight">
+        ${S.phase==='play'?`<button class="btn surrender" type="button" data-act="surrender" ${S.mode==='online'&&!netUp()?'disabled':''}><span aria-hidden="true">⚐&#xFE0E;</span> Surrender</button>`:''}
+        <button class="btn emote-btn" type="button" data-act="emotes" aria-expanded="${EMO.open}" ${S.mode==='online'&&!netUp()?'disabled':''}><span aria-hidden="true">😀</span> React</button>
+      </div>
+      ${EMO.open?`<div class="emotes" role="group" aria-label="Send a reaction">
+        ${EMOTES.map((e,i)=>`<button type="button" class="emo${isWords(e)?' words':''}" data-act="emote:${i}" aria-label="Send ${e}">${e}</button>`).join('')}
+        <label class="toggle"><input type="checkbox" data-pref="emotes" ${prefOn('emotes',true)?'checked':''}> Show my opponent's reactions</label>
+      </div>`:''}
     </div>
     <div class="sec">
       <div class="eyebrow ember">Special orders</div>
@@ -1333,6 +1387,8 @@ function renderPanel(){
       </div>
       <div class="hint">${hint}</div>
       ${S.tool!=='move'&&human?'<button class="btn" type="button" data-act="cancel">Cancel order</button>':''}
+      ${S.premove&&!human?'<button class="btn" type="button" data-act="premove-cancel">Cancel pre-move</button>':''}
+      ${(S.mode==='ai'||S.mode==='online')&&S.phase==='play'?`<label class="toggle"><input type="checkbox" data-pref="premove" ${prefOn('premove',true)?'checked':''}> Allow pre-moves during the enemy's turn</label>`:''}
     </div>
     <div class="sec">
       <div class="eyebrow steel">Field log</div>
@@ -1367,6 +1423,9 @@ const RULES=`<details class="rules"${'%OPEN%'}><summary>Rules of engagement</sum
   <li><b>Veterans</b>: every 3rd enemy a piece defeats in battle promotes it one rank. This stacks with power-ups. A 5★ General or a Spy cannot rank up. Only you see your pieces' kill counts.</li>
   <li><b>Power-ups</b> (12): they jump to new squares after every turn. A battle on one promotes the winner one rank, then it is gone. A 5★ General or a Spy only uses it up. If both pieces fall, it is lost. A Private that beats a Spy on one becomes a random officer rank still on the board.</li>
   <li><b>Surrender</b>: the Surrender button under your piece counts ends the battle at once; your opponent wins.</li>
+  <li><b>Time control</b> (optional): each player has 3, 5 or 10 minutes, plus 3 seconds after every move. Only the side to move loses time; run out and you lose.</li>
+  <li><b>Pre-moves</b>: against the computer or online, you can queue your next move during the enemy's turn. It plays the moment your turn starts if it's still possible. Turn it off in your orders panel.</li>
+  <li><b>React</b>: send an emoji or a short taunt. Your opponent can hide reactions.</li>
   <li><b>Land mines</b> (2): hidden between rows 4 and 7 and never move. A piece that steps on one is destroyed. A barricade built on one sets it off and loses that square.</li>
 </ul></details>`;
 
@@ -1426,6 +1485,111 @@ function askSurrender(){
     <div class="row"><button class="btn danger" type="button" data-act="surrender-yes">Yes, surrender</button><button class="btn primary" type="button" data-act="keep" data-focus>Keep fighting</button></div>`,false,'surrender');
 }
 
+/* ---------- time control (optional chess clock) ----------
+   S.tc = {base, inc, left:[ms,ms], since}: `since` is when the running clock (side S.turn) last started.
+   Only the side to move loses time. The clock pauses on pass-and-play hand-off screens and while an online
+   connection is down. The host's clock is the official one online; the guest only displays it. */
+const TC_INC=3000;
+function makeClock(minutes){return minutes>0?{base:minutes*60000,inc:TC_INC,left:[minutes*60000,minutes*60000],since:null}:null}
+function tcPaused(){return S.phase!=='play'||!!S.handoff||(S.mode==='online'&&!netUp())}
+function tcLeft(o){
+  const c=S.tc;if(!c)return null;
+  let l=c.left[o];
+  if(c.since&&S.turn===o)l-=Date.now()-c.since;
+  return Math.max(0,l);
+}
+function tcBank(){const c=S.tc;if(!c||!c.since)return;c.left[S.turn]=tcLeft(S.turn);c.since=null}
+function tcResume(){if(S.tc&&!S.tc.since&&!tcPaused())S.tc.since=Date.now()}
+function fmtClock(ms){if(ms==null)return'';const s=Math.ceil(ms/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
+function tcTick(){
+  if(!S||!S.tc)return;
+  if(tcPaused())tcBank();else tcResume();
+  document.querySelectorAll('[data-clock]').forEach(el=>{
+    const o=+el.dataset.clock,ms=tcLeft(o);
+    const b=el.querySelector('b');if(b)b.textContent=fmtClock(ms);
+    el.classList.toggle('low',ms<=20000);
+    el.classList.toggle('on',S.phase==='play'&&S.turn===o);
+  });
+  // The guest never decides a timeout; the host's clock does and sends the result.
+  if(S.phase==='play'&&!(S.mode==='online'&&NET.role==='guest')&&S.tc.since&&tcLeft(S.turn)<=0){
+    const t=S.turn;tcBank();
+    finish(1-t,`${who(t)} ran out of time.`);
+  }
+}
+setInterval(tcTick,250);
+
+/* ---------- pre-moves: queue your next move during the opponent's turn ---------- */
+function prefOn(name,dflt){try{const v=localStorage.getItem('gow-'+name);return v==null?dflt:v==='1'}catch(e){return dflt}}
+function setPref(name,on){try{localStorage.setItem('gow-'+name,on?'1':'0')}catch(e){}}
+function canPremove(){
+  return S.phase==='play'&&(S.mode==='ai'||S.mode==='online')&&S.turn!==meSide()&&prefOn('premove',true)
+    &&!(S.mode==='online'&&!netUp());
+}
+function premoveClick(x,y){
+  const me=meSide(),p=pieceAt(x,y),pm=S.premove;
+  if(pm&&((pm.x===x&&pm.y===y)||(p&&p.id===pm.id))){S.premove=null;S.selected=null;render();return}
+  const sel=S.selected?getPiece(S.selected):null;
+  if(sel&&sel.owner===me&&dist(sel,{x,y})===1&&inB(x,y)&&!barAt(x,y)&&!(p&&p.owner===me)){
+    S.premove={id:sel.id,x,y};S.selected=null;snd('select');render();return;
+  }
+  S.selected=p&&p.owner===me&&S.selected!==p.id?p.id:null;
+  if(S.selected)snd('select');
+  render();
+}
+// Runs the queued move once it's our turn, if it's still legal.
+function schedulePremove(){if(S.premove)setTimeout(tryPremove,350)}
+function tryPremove(){
+  const pm=S.premove;
+  if(!pm||!isHumanTurn())return;
+  S.premove=null;
+  const p=getPiece(pm.id);
+  if(p&&p.alive&&legalMoves(p).some(m=>m.x===pm.x&&m.y===pm.y)){S.selected=null;commit({type:'move',id:p.id,x:pm.x,y:pm.y})}
+  else{toast('Pre-move cancelled: that move is no longer possible.','info');render()}
+}
+
+/* ---------- emotes ---------- */
+const EMOTES=['😂','😎','😤','😱','👏','🔥','💀','🤝','Is that all?','Nice move!','Oops!','GG'];
+const EMO={open:false,lastSent:0,lastIn:0};
+const isWords=e=>!/\p{Extended_Pictographic}/u.test(e); // "GG" is text, "😂" is an emoji
+function showEmote(o,i){
+  if(!Number.isInteger(i)||i<0||i>=EMOTES.length)return;
+  const wrap=$('#boardWrap');if(!wrap)return;
+  const mine=o===viewer();
+  const el=document.createElement('div');
+  el.className=`bubble ${mine?'mine':'theirs'} o${o}${isWords(EMOTES[i])?' words':''}`;
+  el.innerHTML=`<span class="who"></span><span class="emo"></span>`;
+  el.querySelector('.who').textContent=who(o);
+  el.querySelector('.emo').textContent=EMOTES[i];
+  wrap.querySelectorAll(`.bubble.${mine?'mine':'theirs'}`).forEach(b=>b.remove());
+  wrap.appendChild(el);
+  snd('select');
+  setTimeout(()=>el.remove(),3200);
+}
+function sendEmote(i){
+  const now=Date.now();
+  if(now-EMO.lastSent<1500)return;
+  EMO.lastSent=now;EMO.open=false;
+  const me=meSide();
+  showEmote(me,i);renderPanel();
+  if(S.mode==='online')send({type:'emote',i});
+  if(S.mode==='ai'&&Math.random()<.4)setTimeout(()=>aiEmote(['😂','😎','Is that all?','🤝','GG'][rnd(5)]),1200+rnd(800));
+}
+function receiveEmote(o,i){
+  if(!Number.isInteger(i)||i<0||i>=EMOTES.length)return; // only the fixed list, nothing else
+  const now=Date.now();
+  if(now-EMO.lastIn<800||!prefOn('emotes',true))return; // drop floods; honour mute
+  EMO.lastIn=now;showEmote(o,i);
+}
+function aiEmote(text){if(S.mode==='ai'&&prefOn('emotes',true))showEmote(1,EMOTES.indexOf(text))}
+// The computer now and then reacts to a battle it took part in.
+function aiReact(out,A){
+  if(S.mode!=='ai')return;
+  const aiWon=(A===1&&out==='a')||(A===0&&out==='d');
+  const aiLost=(A===1&&out==='d')||(A===0&&out==='a');
+  if(aiWon&&Math.random()<.3)setTimeout(()=>aiEmote(['😎','🔥','Is that all?'][rnd(3)]),900);
+  else if(aiLost&&Math.random()<.22)setTimeout(()=>aiEmote(['😤','😱','Nice move!'][rnd(3)]),900);
+}
+
 /* ---------- player names, asked before every game ---------- */
 // mode: 'ai' (you vs the computer), 'local' (two names), 'host' (your name, then a room opens).
 function showNames(mode){
@@ -1443,33 +1607,41 @@ function showNames(mode){
         ${[['easy','Easy','Plays by simple habits'],['normal','Normal','Reads the battle, makes some mistakes'],['hard','Hard','Tracks every clue, plays sharp']]
           .map(([v,t,d])=>`<label class="level"><input type="radio" name="level" value="${v}" ${(saved.level||'normal')===v?'checked':''}><b>${t}</b><span>${d}</span></label>`).join('')}
       </fieldset>`:''}
+      <fieldset class="levels tcs"><legend>Time control · each player's clock runs only on their turn, +3 s per move</legend>
+        ${[[0,'Off','No clock'],[3,'3 min','Blitz'],[5,'5 min','Quick'],[10,'10 min','Relaxed']]
+          .map(([v,t,d])=>`<label class="level"><input type="radio" name="tc" value="${v}" ${(+(saved.tc??0))===v?'checked':''}><b>${t}</b><span>${d}</span></label>`).join('')}
+      </fieldset>
       <div class="row"><button class="btn primary" type="submit">${mode==='host'?'Create room':'Start game'}</button><button class="btn" type="button" data-act="menu">Back</button></div>
     </form>`,false,'names');
 }
 function submitNames(form){
   const mode=form.dataset.mode,el=form.elements;
   const n0=cleanName(el.n0.value)||SIDE[0];
+  const tc=[0,3,5,10].includes(+(el.tc&&el.tc.value))?+el.tc.value:0;
+  rememberNames({tc});
   if(mode==='local'){
     const n1=cleanName(el.n1.value)||SIDE[1];
     rememberNames({local0:n0,local1:n1});
-    return newGame('local',[n0,n1]);
+    return newGame('local',[n0,n1],null,tc);
   }
   if(n0!==SIDE[0])rememberNames({me:n0});
   if(mode==='ai'){
     const level=['easy','normal','hard'].includes(el.level&&el.level.value)?el.level.value:'normal';
     rememberNames({level});
-    return newGame('ai',[n0,'Computer'],level);
+    return newGame('ai',[n0,'Computer'],level,tc);
   }
-  NET.myName=n0;hostGame();
+  NET.myName=n0;NET.tc=tc;hostGame();
 }
 
 /* ---------- game lifecycle ---------- */
-function newGame(mode,names,level){
+function newGame(mode,names,level,tcMinutes){
   netClose();
   if(S)clearInterval(S.timer);
   S=freshState(mode);
   if(names)S.names=names;
   if(level)S.aiLevel=level;
+  S.tc=makeClock(tcMinutes||0);
+  EMO.open=false;
   formation(0);formation(1);
   if(mode==='ai'&&AI_LEVELS[S.aiLevel]&&AI_LEVELS[S.aiLevel].smartSetup)aiFormation(1);
   closeOverlay();
@@ -1478,7 +1650,10 @@ function newGame(mode,names,level){
 }
 
 function act(a){
+  if(a.startsWith('emote:'))return sendEmote(+a.slice(6));
   switch(a){
+    case'emotes':EMO.open=!EMO.open;renderPanel();break;
+    case'premove-cancel':S.premove=null;S.selected=null;render();break;
     case'ai':case'local':showNames(a);break;
     case'again':
       if(S.mode!=='online')showNames(S.mode);
@@ -1501,7 +1676,7 @@ function act(a){
       const h=S.handoff;if(!h)break;
       S.handoff=null;closeOverlay();
       if(h.kind==='setup')beginSetup(h.p);
-      else{render();S.pending[h.p].forEach(r=>toast(r.text,r.kind));S.pending[h.p]=[]}
+      else{tcResume();render();S.pending[h.p].forEach(r=>toast(r.text,r.kind));S.pending[h.p]=[]}
       break;}
     case'shuffle':
       if(S.phase!=='setup'||S.ready[viewer()])break;
@@ -1529,7 +1704,7 @@ function act(a){
 }
 
 function playClick(x,y){
-  if(!isHumanTurn())return;
+  if(!isHumanTurn()){if(canPremove())premoveClick(x,y);return}
   const me=S.turn,v=viewer();
   if(S.tool==='barH'||S.tool==='barV'){
     const cells=barCells(x,y,S.tool,v);
@@ -1571,6 +1746,11 @@ $('#board').addEventListener('mouseover',e=>{
 });
 $('#board').addEventListener('mouseleave',()=>document.querySelectorAll('.sq.hov').forEach(n=>n.classList.remove('hov')));
 $('#panel').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b&&!b.disabled)act(b.dataset.act)});
+$('#panel').addEventListener('change',e=>{
+  const t=e.target.closest('[data-pref]');if(!t)return;
+  setPref(t.dataset.pref,t.checked);
+  if(t.dataset.pref==='premove'&&!t.checked){S.premove=null;render()}
+});
 $('#card').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b&&!b.disabled)act(b.dataset.act)});
 $('#menuBtn').addEventListener('click',showMenu);
 $('#soundBtn').addEventListener('click',()=>setMuted(!SND.muted));
@@ -1621,7 +1801,7 @@ function commit(a){
 const PEER_SRC='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
 const ID_PREFIX='game-of-war-';
 const CODE_CHARS='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-const NET={role:null,code:null,lastCode:null,myName:'',guestName:''};
+const NET={role:null,code:null,lastCode:null,myName:'',guestName:'',tc:0};
 let peer=null,conn=null,lastSent='';
 function netUp(){return!!(conn&&conn.open)}
 function send(m){if(netUp())try{conn.send(m)}catch(e){}}
@@ -1664,7 +1844,8 @@ function viewFor(o){
   const pieces=S.pieces.filter(p=>p.alive&&(p.owner===o||S.phase!=='setup'))
     .map(p=>p.owner===o||over?{...p}:{...p,rank:null,kills:0});
   const v={mode:'online',me:o,phase:S.phase,turn:S.turn,moves:S.moves,winner:S.winner,reason:S.reason,
-    names:S.names,pieces,bars:S.bars,mines:over?S.mines:[],craters:S.craters,powerups:S.powerups,skills:S.skills,
+    names:S.names,pieces,bars:S.bars,
+    tc:S.tc?{base:S.tc.base,inc:S.tc.inc,left:[tcLeft(0),tcLeft(1)],run:S.tc.since?S.turn:-1}:null,mines:over?S.mines:[],craters:S.craters,powerups:S.powerups,skills:S.skills,
     barUsed:S.barUsed,last:S.last,flagPending:S.flagPending,ready:S.ready,timeLeft:S.timeLeft,
     log:S.log.filter(e=>e.vis==='all'||e.vis===o),fallen:o===0?[S.fallen[0],[]]:[[],S.fallen[1]],
     fx:S.fx,sfx:S.sfx,puFresh:S.puFresh,toasts:S.pending[o]};
@@ -1783,6 +1964,7 @@ function onData(m){
     else if(m.type==='arrange')hostArrange(m.pos);
     else if(m.type==='ready'){if(S.phase==='setup'&&!S.ready[1])markReady(1)}
     else if(m.type==='surrender'){if(S.phase==='play')surrender(1)}
+    else if(m.type==='emote')receiveEmote(1,m.i);
     else if(m.type==='rematch'){if(S.phase==='over'){toast(`${who(1)} started a rematch.`,'info');newOnlineGame()}}
     else if(m.type==='hello'){
       const name=cleanName(m.name);
@@ -1793,6 +1975,7 @@ function onData(m){
     if(m.type==='state')guestState(m.v);
     else if(m.type==='tick'){if(S.mode==='online'&&S.phase==='setup'){S.timeLeft=m.t;tickClock()}}
     else if(m.type==='full'){netClose();showJoin(NET.lastCode,'That game already has two players.')}
+    else if(m.type==='emote')receiveEmote(0,m.i);
   }
 }
 function hostArrange(pos){
@@ -1810,6 +1993,8 @@ function newOnlineGame(){
   if(S)clearInterval(S.timer);
   S=freshState('online');S.me=0;
   S.names=[NET.myName||SIDE[0],NET.guestName||SIDE[1]];
+  S.tc=makeClock(NET.tc||0);
+  EMO.open=false;
   formation(0);formation(1);
   closeOverlay();
   beginSetup(0);
@@ -1820,6 +2005,11 @@ function guestState(v){
   const wasOnline=prev&&prev.mode==='online';
   const next={...freshState('online'),...v,busy:false,timer:null};
   next.names=[0,1].map(i=>cleanName(v.names&&v.names[i])||SIDE[i]);
+  // The host's clock is official; count down locally from the time it reported.
+  next.tc=v.tc&&Array.isArray(v.tc.left)?{base:+v.tc.base,inc:+v.tc.inc,left:v.tc.left.map(Number),since:v.tc.run>=0?Date.now():null}:null;
+  // A queued pre-move survives state updates; it fires when the turn comes to us.
+  if(wasOnline&&prev.premove&&v.phase==='play')next.premove=prev.premove;
+  const myTurnNow=v.phase==='play'&&v.turn===next.me&&!(wasOnline&&prev.phase==='play'&&prev.turn===next.me);
   if(wasOnline&&prev.phase===v.phase&&prev.turn===v.turn&&prev.moves===v.moves){next.selected=prev.selected;next.tool=prev.tool;next.preview=prev.preview}
   if(wasOnline&&prev.phase==='setup'&&v.phase==='setup'){next.pieces=prev.pieces;next.ready=[v.ready[0],prev.ready[1]||v.ready[1]]}
   S=next;
@@ -1831,6 +2021,7 @@ function guestState(v){
   }
   (v.toasts||[]).forEach(t=>toast(t.text,t.kind));
   render();
+  if(myTurnNow)schedulePremove();
 }
 function leaveOnline(){
   netClose();

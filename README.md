@@ -16,6 +16,15 @@ A 2D hidden-rank war strategy board game on a 10×10 field, in the style of Game
 
 Before every game, each player types their name (the last names used are filled in). Names replace "Ivory" and "Onyx" in the turn indicator, hand-off screens, field log and result screen. Online, the host enters theirs when creating the room and the guest on the join screen.
 
+Also on that screen:
+
+- **Time control** (optional): Off, or 3, 5 or 10 minutes per player with +3 seconds after every move, like a chess clock. Only the side to move loses time, and running out loses the game. The clock pauses on pass-and-play hand-off screens and while an online connection is down; online, the host's clock is the official one.
+
+During a game:
+
+- **Pre-moves:** against the computer or online, queue your next move during the enemy's turn (tap a piece, then a square). It plays the moment your turn starts if it's still possible, otherwise it's cancelled. Can be switched off in the orders panel.
+- **React:** send an emoji or a short taunt ("Is that all?", "GG"…) that pops up over the board for both players. The computer reacts too. You can hide your opponent's reactions.
+
 ## Install on a phone
 
 Open https://spacecarl9001.github.io/Game-of-War/ on your phone, then:
