@@ -276,9 +276,11 @@ button{font:inherit;color:inherit}
 .row.tight{gap:8px;margin-top:10px}
 .row.tight .btn{flex:1 1 0;margin-top:0}
 .btn.emote-btn{font-size:13px;padding:8px 10px}
-.emotes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
+.emotes{display:grid;gap:6px;margin-top:10px}
+.emo-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:6px}
+.word-row{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .emotes .emo{font-size:24px;line-height:1;padding:8px 0;background:var(--panel-2);border:1px solid var(--line);border-radius:4px;color:var(--ink);cursor:pointer}
-.emotes .emo.words{grid-column:span 2;font:600 14px/1.2 var(--f-ui);letter-spacing:.03em;padding:10px 6px}
+.emotes .emo.words{font:600 14px/1.2 var(--f-ui);letter-spacing:.03em;padding:10px 6px}
 .emotes .emo:hover{border-color:var(--brass-hi)}
 .toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:10px;cursor:pointer;grid-column:1/-1}
 .toggle input{accent-color:var(--brass-hi);width:16px;height:16px}
@@ -1371,7 +1373,8 @@ function renderPanel(){
         <button class="btn emote-btn" type="button" data-act="emotes" aria-expanded="${EMO.open}" ${S.mode==='online'&&!netUp()?'disabled':''}><span aria-hidden="true">😀</span> React</button>
       </div>
       ${EMO.open?`<div class="emotes" role="group" aria-label="Send a reaction">
-        ${EMOTES.map((e,i)=>`<button type="button" class="emo${isWords(e)?' words':''}" data-act="emote:${i}" aria-label="Send ${e}">${e}</button>`).join('')}
+        ${[false,true].map(words=>`<div class="${words?'word-row':'emo-row'}">${EMOTES.map((e,i)=>isWords(e)!==words?'':
+          `<button type="button" class="emo${words?' words':''}" data-act="emote:${i}" aria-label="Send ${e}">${e}</button>`).join('')}</div>`).join('')}
         <label class="toggle"><input type="checkbox" data-pref="emotes" ${prefOn('emotes',true)?'checked':''}> Show my opponent's reactions</label>
       </div>`:''}
     </div>
@@ -1548,7 +1551,8 @@ function tryPremove(){
 }
 
 /* ---------- emotes ---------- */
-const EMOTES=['😂','😎','😤','😱','👏','🔥','💀','🤝','Is that all?','Nice move!','Oops!','GG'];
+// Sent online by position in this list, so add new ones at the end only.
+const EMOTES=['😂','😎','😤','😱','👏','🔥','💀','🤝','Is that all?','Nice move!','Oops!','GG','😡'];
 const EMO={open:false,lastSent:0,lastIn:0};
 const isWords=e=>!/\p{Extended_Pictographic}/u.test(e); // "GG" is text, "😂" is an emoji
 function showEmote(o,i){
@@ -1587,7 +1591,7 @@ function aiReact(out,A){
   const aiWon=(A===1&&out==='a')||(A===0&&out==='d');
   const aiLost=(A===1&&out==='d')||(A===0&&out==='a');
   if(aiWon&&Math.random()<.3)setTimeout(()=>aiEmote(['😎','🔥','Is that all?'][rnd(3)]),900);
-  else if(aiLost&&Math.random()<.22)setTimeout(()=>aiEmote(['😤','😱','Nice move!'][rnd(3)]),900);
+  else if(aiLost&&Math.random()<.22)setTimeout(()=>aiEmote(['😤','😡','😱','Nice move!'][rnd(4)]),900);
 }
 
 /* ---------- player names, asked before every game ---------- */
