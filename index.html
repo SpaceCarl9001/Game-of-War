@@ -292,6 +292,21 @@ button{font:inherit;color:inherit}
 .bubble .emo{font-size:42px;line-height:1.1}
 .bubble.words .emo{font:600 22px/1.2 var(--f-ui);letter-spacing:.02em;color:var(--ink)}
 .bubble.o1{border-color:var(--onyx-edge,#5b8fb9)}
+.bubble.chatb{animation:bubbleIn .25s ease-out,bubbleOut .4s ease-in var(--out,2.8s) forwards}
+.bubble.chatb .emo{font:500 16px/1.35 var(--f-ui);color:var(--ink);max-width:30ch;text-align:center;overflow-wrap:anywhere}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.side .panel{display:contents} /* its sections sit in .side so the chat can go between them */
+#panel>.sec:nth-child(n+3){order:2}
+#chat{order:1} #chat[hidden]{display:none}
+.chatlog{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:200px;overflow:auto;font-size:14.5px}
+.chatlog li{color:var(--ink);overflow-wrap:anywhere;min-width:0}
+.chatlog li .chip{width:10px;height:10px;margin-right:6px;vertical-align:baseline}
+.chatlog li b{font-weight:600;margin-right:6px}
+.chatlog li.note{color:var(--muted)}
+.chatform{display:flex;gap:8px}
+.chatform input{flex:1 1 auto;min-width:0;font:400 15px var(--f-ui);padding:8px 10px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:4px}
+.chatform input:focus{outline:2px solid var(--brass-hi);outline-offset:1px}
+.chatform input:disabled{opacity:.5}
 @keyframes bubbleIn{from{opacity:0;margin-top:12px}to{opacity:1;margin-top:0}}
 @keyframes bubbleOut{to{opacity:0}}
 /* Computer difficulty */
@@ -338,7 +353,7 @@ button{font:inherit;color:inherit}
   </header>
   <main class="app">
     <section class="board-wrap" id="boardWrap"><div class="board" id="board" role="grid" aria-label="Game board"></div><canvas id="fxc" aria-hidden="true"></canvas></section>
-    <aside class="panel" id="panel"></aside>
+    <div class="side"><aside class="panel" id="panel"></aside><section class="sec chat" id="chat" aria-label="Chat" hidden></section></div>
   </main>
 </div>
 <div class="overlay" id="overlay" hidden><div class="card" id="card" role="dialog" aria-modal="true"></div></div>
@@ -444,7 +459,7 @@ function beginSetup(p){
   render();
 }
 function tickClock(){
-  if(S.mode==='online'&&NET.role==='host')send({type:'tick',t:S.timeLeft});
+  if(S.mode==='online'&&NET.role==='host'){send({type:'tick',t:S.timeLeft});toWatchers({type:'tick',t:S.timeLeft})}
   if(S.timeLeft>0&&S.timeLeft<=10)snd('tick');
   const low=S.timeLeft<=15;
   const t=$('#timer');if(t){t.textContent=fmt(S.timeLeft);t.classList.toggle('low',low)}
@@ -678,8 +693,12 @@ function finish(w,reason){
 function aiTurn(){
   S.busy=false;
   if(S.phase!=='play'||S.turn!==1)return;
-  const me=1,L=AI_LEVELS[S.aiLevel];
-  aiMaybeBarricade(me);
+  aiPlayTurn(1,S.aiLevel);
+}
+// One whole computer turn for `me` at `level` (also used by the computer-vs-computer test matches).
+function aiPlayTurn(me,level){
+  const L=AI_LEVELS[level];
+  if(L&&L.expert)expertBarricade(me,aiIntel(me),L);else aiMaybeBarricade(me);
   if(L){
     const a=aiSmartTurn(me,L);
     if(a&&a.type==='air'){airStrike(me,getPiece(a.id));endTurn();return}
@@ -690,7 +709,7 @@ function aiTurn(){
     const mv=aiPickMove(me);
     if(mv){doMove(mv.p,mv.x,mv.y);endTurn();return}
   }
-  finish(0,`${who(1)} has no legal moves left.`);
+  finish(1-me,`${who(me)} has no legal moves left.`);
 }
 function aiMaybeBarricade(me){
   const sk=S.skills[me];if(!sk.h&&!sk.v)return;
@@ -756,6 +775,8 @@ const AI_LEVELS={
   easy:null, // the original rule-of-thumb opponent above
   normal:{temp:.9,risk:.55,airFlag:.6,hunt:.25,push:.12,decoys:3,smartSetup:true},
   hard:{temp:.15,risk:.8,airFlag:.35,hunt:.35,push:.15,decoys:5,smartSetup:true},
+  expert:{temp:.1,risk:.8,airFlag:.35,hunt:.35,push:.15,decoys:5,smartSetup:true,expert:true,
+    look:.6,aggr:.7,recap:.8,follow:.3,conceal:.4,run:1.5,intercept:3,race:.6,barGamma:.5,barMin:.6,barTell:.3},
 };
 const VAL=[0,1,1.4,1.8,2.2,2.6,3,3.5,4.2,5,6,7,8.5,10,6.5]; // material value of each rank (FLAG handled as WIN)
 const WIN=60;
@@ -924,7 +945,16 @@ function aiSmartStrike(me,intel,L){
   // A confident shot at the enemy flag wins the game outright.
   let best=null,bp=0;
   for(const e of foes){const p=intel.belief.get(e.id)[FLAG];if(p>bp){bp=p;best=e}}
-  const need=foes.length<=7?L.airFlag-.12:L.airFlag;
+  let need=foes.length<=7?L.airFlag-.12:L.airFlag;
+  if(L.expert&&f){
+    // Expert: a likely flag one step from our back row with nothing of ours able to stop it.
+    for(const e of foes){
+      const pf=intel.belief.get(e.id)[FLAG];
+      if(pf>=.15&&Math.abs(e.y-farRow(1-me))<=1&&!alive(me).some(p=>p.rank!==FLAG&&dist(p,e)===1))return e;
+    }
+    // Race: shoot sooner while the opponent is closing in on our flag and still has their own strike.
+    if(S.skills[1-me].air)need-=L.race*Math.max(0,(publicFlagOdds(me).get(f.id)||0)-.25);
+  }
   if(best&&bp>=need)return best;
   return null;
 }
@@ -933,9 +963,10 @@ function aiSmartTurn(me,L){
   const intel=aiIntel(me);
   const strike=aiSmartStrike(me,intel,L);
   if(strike)return{type:'air',id:strike.id};
+  const X=L.expert?expertContext(me,intel,L):null;
   let best=null;
   for(const p of alive(me))for(const m of legalMoves(p)){
-    const s=scoreMove(me,intel,p,m,L)+gumbel()*L.temp;
+    const s=scoreMove(me,intel,p,m,L)+(X?expertExtra(me,intel,L,X,p,m):0)+gumbel()*L.temp;
     if(!best||s>best.s)best={p,m,s};
   }
   if(!best)return null;
@@ -961,6 +992,144 @@ function aiFormation(o){
   const free=shuffle(homeRows(o).flatMap(y=>[...Array(N).keys()].map(x=>({x,y}))).filter(c=>!taken.has(key(c.x,c.y))));
   rest.forEach((p,i)=>put(p,free[i].x,free[i].y));
   pieces.forEach(p=>delete p.placed);
+}
+
+/* ---------- Expert: Hard's judgement plus lookahead, flag concealment, planned barricades and route planning ----------
+   Same fair-play rule: it never reads an enemy rank or a mine position. What it assumes the opponent knows about its
+   own pieces comes from public facts only: where each piece started, whether it moved, and the battles it fought. */
+const bfsFrom=(starts,pass)=>{ // path distance on the board; `pass(x,y)` says whether a square can be crossed
+  const d=new Array(N*N).fill(Infinity),q=[];
+  for(const s of starts){const i=s.y*N+s.x;if(d[i]>0){d[i]=0;q.push(i)}}
+  for(let h=0;h<q.length;h++){
+    const i=q[h],x=i%N,y=(i-x)/N;
+    for(const[dx,dy]of DIRS){const nx=x+dx,ny=y+dy,j=ny*N+nx;if(inB(nx,ny)&&d[j]===Infinity&&pass(nx,ny)){d[j]=d[i]+1;q.push(j)}}
+  }
+  return d;
+};
+/** How likely the other side thinks each of o's living pieces is the flag, from public facts only. */
+function publicFlagOdds(o,movedId,foughtId){
+  const back=o===0?0:N-1,fought=new Set();
+  for(const ob of S.obs||[]){if(ob.aOwner===o)fought.add(ob.aId);else fought.add(ob.dId)}
+  if(foughtId!=null)fought.add(foughtId);
+  const w=new Map();let tot=0;
+  for(const p of alive(o)){
+    if(fought.has(p.id)){w.set(p.id,0);continue} // a flag that fights is captured (or attacked and lost)
+    const st=S.start&&S.start[p.id],row=st?Math.abs(st.y-back):0;
+    let v=row===0?1:row===1?.35:.15;
+    if(p.moved||p.id===movedId)v*=.08;
+    w.set(p.id,v);tot+=v;
+  }
+  if(tot>0)w.forEach((v,k)=>w.set(k,v/tot));
+  return w;
+}
+/** Tactics one move deep for each side, from our point of view: the worst blow the opponent can strike next
+    (net of our best recapture), and the best attack we'd have after that. Uses beliefs, never enemy ranks. */
+function tacticalValue(me,intel,L){
+  const occ=new Array(N*N).fill(null);
+  for(const p of S.pieces)if(p.alive)occ[p.y*N+p.x]=p;
+  let worst=0,best=0;
+  for(const e of S.pieces){
+    if(!e.alive||e.owner===me)continue;
+    const b=intel.belief.get(e.id);if(!b)continue;
+    for(const[dx,dy]of DIRS){
+      const x=e.x+dx,y=e.y+dy;if(!inB(x,y))continue;
+      const q=occ[y*N+x];if(!q||q.owner!==me||q.rank===FLAG)continue; // flag safety is scored separately
+      // They attack q: what we expect to lose, less what we'd win back.
+      let pW=0,pT=0,lossBack=0,tieBack=0;const bW=new Array(15).fill(0);
+      for(let r=0;r<15;r++){
+        if(!b[r])continue;
+        const out=battle(r,q.rank);
+        if(out==='a'){pW+=b[r];bW[r]=b[r]}else if(out==='both'){pT+=b[r];tieBack+=b[r]*worth(r)}else lossBack+=b[r]*worth(r);
+      }
+      let rec=0;
+      if(pW>1e-9){
+        for(let r=0;r<15;r++)bW[r]/=pW;
+        for(const[ex,ey]of DIRS){const n=inB(x+ex,y+ey)&&occ[(y+ey)*N+x+ex];if(n&&n.owner===me&&n!==q&&n.rank!==FLAG)rec=Math.max(rec,attackEV(n.rank,bW).ev)}
+      }
+      const dmg=pW*(worth(q.rank)-L.recap*rec)+pT*worth(q.rank)-tieBack-lossBack;
+      if(dmg>worst)worst=dmg;
+      // Our attack on e, if it's still there next turn.
+      if(q.rank!==FLAG){const ev=attackEV(q.rank,b).ev;if(ev>best)best=ev}
+    }
+  }
+  return-worst*L.aggr+L.follow*best;
+}
+/** Everything Expert works out once per turn before scoring moves. */
+function expertContext(me,intel,L){
+  const foe=1-me,f=flagOf(me),foes=alive(foe);
+  const odds=publicFlagOdds(me);
+  const safeSq=(x,y)=>!(y>=3&&y<=6)||S.safe.has(key(x,y))||S.craters.some(c=>c.x===x&&c.y===y);
+  // Our flag's road to the enemy back row: open squares only, around enemy pieces and unexplored minefield.
+  const goal=[...Array(N).keys()].map(x=>({x,y:farRow(me)}));
+  const run=bfsFrom(goal,(x,y)=>!barAt(x,y)&&safeSq(x,y)&&!(pieceAt(x,y)&&pieceAt(x,y).owner===foe));
+  // Enemy pieces that might be their flag heading for our back row.
+  const home=[...Array(N).keys()].map(x=>({x,y:farRow(foe)}));
+  const toHome=bfsFrom(home,(x,y)=>!barAt(x,y));
+  const runners=foes.map(e=>{const pf=intel.belief.get(e.id)[FLAG],d=toHome[e.y*N+e.x];return{e,u:d<=4?pf*WIN*Math.pow(.55,Math.max(0,d-1)):0}}).filter(r=>r.u>.05);
+  return{f,odds,odds0:f?odds.get(f.id)||0:0,oppAir:S.skills[foe].air>0?1:.25,run,runners,V0:tacticalValue(me,intel,L)};
+}
+function expertExtra(me,intel,L,X,p,m){
+  const tgt=m.attack?pieceAt(m.x,m.y):null;
+  let s=0;
+  // Lookahead: the tactical balance after this move (battle results weighted by our belief about the target).
+  const ox=p.x,oy=p.y,om=p.moved;
+  p.moved=true;
+  if(!tgt){p.x=m.x;p.y=m.y;s+=L.look*(tacticalValue(me,intel,L)-X.V0);p.x=ox;p.y=oy}
+  else{
+    const b=intel.belief.get(tgt.id);let pa=0,pd=0,pt=0;const bd=new Array(15).fill(0);
+    for(let r=0;r<15;r++){if(!b[r])continue;const out=battle(p.rank,r);if(out==='a')pa+=b[r];else if(out==='d'){pd+=b[r];bd[r]=b[r]}else pt+=b[r]}
+    let v=0;
+    if(pa>1e-6){tgt.alive=false;p.x=m.x;p.y=m.y;v+=pa*tacticalValue(me,intel,L);p.x=ox;p.y=oy;tgt.alive=true}
+    if(pd>1e-6){for(let r=0;r<15;r++)bd[r]/=pd;p.alive=false;intel.belief.set(tgt.id,bd);v+=pd*tacticalValue(me,intel,L);intel.belief.set(tgt.id,b);p.alive=true}
+    if(pt>1e-6){tgt.alive=false;p.alive=false;v+=pt*tacticalValue(me,intel,L);tgt.alive=true;p.alive=true}
+    s+=L.look*(v-X.V0);
+  }
+  p.moved=om;
+  // Concealment: how much more (or less) this move tells the opponent about where our flag is.
+  if(X.f){
+    const after=publicFlagOdds(me,p.id,tgt?p.id:null).get(X.f.id)||0;
+    s-=L.conceal*WIN*X.oppAir*(after-X.odds0);
+  }
+  // Route planning: run our flag down an open lane; chase enemy pieces that might be their flag running home.
+  if(p.rank===FLAG&&!tgt&&mineRisk(m.x,m.y)===0&&!alive(1-me).some(e=>dist(e,m)<=2)){
+    const a=X.run[p.y*N+p.x],c=X.run[m.y*N+m.x];
+    if(c<a&&c<Infinity)s+=L.run*(1+4/(1+c));
+  }
+  if(p.rank!==FLAG)for(const r of X.runners)s+=L.intercept*r.u*(1/(1+dist(m,r.e))-1/(1+dist(p,r.e)));
+  return s;
+}
+/** Expert barricades: block the shortest roads to our flag and to our back row, where that helps most. */
+function expertBarricade(me,intel,L){
+  const c=expertBarricadeChoice(me,intel,L);
+  if(c)placeBarricade(me,c.cells,c.tool);
+}
+function expertBarricadeChoice(me,intel,L){
+  const sk=S.skills[me];if(!sk.h&&!sk.v)return null;
+  const f=flagOf(me),foes=alive(1-me);if(!f||!foes.length)return null;
+  const home=[...Array(N).keys()].map(x=>({x,y:farRow(1-me)}));
+  const pf=new Map(foes.map(e=>[e.id,intel.belief.get(e.id)[FLAG]]));
+  const threat=()=>{
+    const dF=bfsFrom([f],(x,y)=>!barAt(x,y)),dB=bfsFrom(home,(x,y)=>!barAt(x,y));
+    let t=0;
+    for(const e of foes){t+=Math.pow(L.barGamma,dF[e.y*N+e.x]-1);t+=pf.get(e.id)*WIN*.1*Math.pow(L.barGamma,dB[e.y*N+e.x])}
+    return t;
+  };
+  const base=threat();if(base<=0)return null;
+  let best=null;
+  for(const tool of['barH','barV']){
+    if(!sk[tool==='barH'?'h':'v'])continue;
+    for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+      const cells=barCells(x,y,tool,0);
+      if(!validBar(cells))continue;
+      const bar={owner:me,cells};S.bars.push(bar);
+      let gain=base-threat();
+      S.bars.pop();
+      if(cells.some(c=>dist(c,f)===1))gain-=L.barTell; // a wall hugging one piece points at the flag
+      if(!best||gain>best.gain)best={gain,cells,tool};
+    }
+  }
+  const left=sk.h+sk.v;
+  return best&&best.gain>=L.barMin*(5-left)/2?best:null;
 }
 
 /* ---------- messaging ---------- */
@@ -1165,17 +1334,17 @@ function sfx(t,data){S.sfx.push({t,...(data||{})})}
 // Plays queued game sounds from this player's side of the table.
 function playSfx(list){
   if(!list||!list.length||SND.muted)return;
-  const me=meSide();
+  const me=meSide(),neutral=S.mode==='local'||S.spec; // pass-and-play and spectators hear it from the attacker's side
   for(const e of list){
     if(e.t==='battle'){
       snd('clash');
-      const pov=S.mode==='local'?e.A:me;
+      const pov=neutral?e.A:me;
       const res=e.out==='both'?'both':((e.out==='a')===(pov===e.A)?'won':'lost');
       setTimeout(()=>snd(res),200);
     }else if(e.t==='over'){
-      setTimeout(()=>snd(S.mode==='local'||e.w===me?'victory':'defeat'),500);
+      setTimeout(()=>snd(neutral||e.w===me?'victory':'defeat'),500);
     }else if(e.t==='turn'){
-      if(S.mode!=='local'&&e.p===me)setTimeout(()=>snd('turn'),250);
+      if(!neutral&&e.p===me)setTimeout(()=>snd('turn'),250);
     }else snd(e.t);
   }
 }
@@ -1194,7 +1363,7 @@ function toBoard(r,c,v){return v===1?{x:N-1-c,y:r}:{x:c,y:N-1-r}}
 function toScreen(x,y,v){return v===1?{r:y,c:N-1-x}:{r:N-1-y,c:x}}
 function isHumanTurn(){
   if(S.phase!=='play'||S.busy||S.handoff)return false;
-  if(S.mode==='online')return S.turn===S.me&&netUp();
+  if(S.mode==='online')return!S.spec&&S.turn===S.me&&netUp();
   return S.mode==='local'||S.turn===0;
 }
 function face(rank){
@@ -1203,7 +1372,7 @@ function face(rank){
   return SHORT[rank];
 }
 
-function render(){renderStatus();renderBoard();renderPanel();playFx(S.fx);playSfx(S.sfx);save();sync();S.fx=[];S.sfx=[];S.puFresh=false}
+function render(){renderStatus();renderBoard();renderPanel();renderChatBox();playFx(S.fx);playSfx(S.sfx);save();sync();S.fx=[];S.sfx=[];S.puFresh=false}
 
 /* ---------- save & resume (a phone may close the app mid-game) ---------- */
 const SAVE_KEY='gow-save-v1';
@@ -1239,11 +1408,11 @@ function renderStatus(){
   else if(S.phase==='setup')st.innerHTML=`<span class="chip o${viewer()}"></span>${S.mode==='online'?'Both sides deploying':who(S.setupPlayer)+' deploying'} <span class="clock${S.timeLeft<=15?' low':''}" id="hdrClock">${fmt(S.timeLeft)}</span>`;
   else if(S.phase==='play'){
     const txt=S.mode==='ai'?(S.turn===0?'Your move':`${who(1)} is thinking`)
-      :S.mode==='online'?(S.turn===S.me?'Your move':`${who(S.turn)} is moving`)
+      :S.mode==='online'&&!S.spec?(S.turn===S.me?'Your move':`${who(S.turn)} is moving`)
       :`${who(S.turn)} to move`;
     st.innerHTML=`<span class="chip o${S.turn}"></span>${txt} <span class="muted">· Turn ${S.moves+1}</span>${S.tc?` <span class="clock mini" data-clock="${S.turn}"><b>${fmtClock(tcLeft(S.turn))}</b></span>`:''}`;
   }
-  else st.innerHTML=`<span class="chip o${S.winner}"></span>${S.mode==='ai'?(S.winner===0?'Victory':'Defeat'):S.mode==='online'?(S.winner===S.me?'Victory':'Defeat'):who(S.winner)+' wins'}`;
+  else st.innerHTML=`<span class="chip o${S.winner}"></span>${S.mode==='ai'?(S.winner===0?'Victory':'Defeat'):S.mode==='online'&&!S.spec?(S.winner===S.me?'Victory':'Defeat'):who(S.winner)+' wins'}`;
 }
 
 function renderBoard(){
@@ -1263,7 +1432,7 @@ function renderBoard(){
       const cls=['sq',(x+y)%2?'a':'b'];
       if(y>=3&&y<=6)cls.push('band');else cls.push(y<3?'z0':'z1');
       if(showPU&&puAt(x,y)>=0){cls.push('pu-on');if(pop)cls.push('pop')}
-      if(S.phase==='setup'&&homeRows(v).includes(y))cls.push('zone');
+      if(S.phase==='setup'&&!S.spec&&homeRows(v).includes(y))cls.push('zone');
       let trail='';
       if(S.last&&S.phase!=='setup'&&S.phase!=='menu'){
         const who=S.last.owner===v?'by-me':'by-foe';
@@ -1282,7 +1451,7 @@ function renderBoard(){
       if(barMode&&validBar(barCells(x,y,S.tool,v)))cls.push('can');
       if(prev.some(q=>q.x===x&&q.y===y))cls.push('prev');
       let p=pieceAt(x,y);
-      if(p&&S.phase==='setup'&&p.owner!==v)p=null;
+      if(p&&S.phase==='setup'&&p.owner!==v&&!S.spec)p=null;
       const bc=barAt(x,y);
       if(airMode&&(p&&p.owner!==me||bc))cls.push('tgt');
       let inner=trail;
@@ -1295,7 +1464,7 @@ function renderBoard(){
       if(reveal&&mineAt(x,y)>=0)inner+='<span class="mine" title="Unexploded land mine"></span>';
       let label=sq(x,y);
       if(p){
-        const show=p.owner===v||reveal;
+        const show=p.owner===v||S.spec||reveal;
         const selp=(sel&&sel.id===p.id)||(S.phase==='setup'&&S.preview&&S.preview.x===x&&S.preview.y===y);
         const kills=show&&p.kills?`<span class="kc" title="${p.kills} kill${p.kills>1?'s':''}">${p.kills}</span>`:'';
         inner+=`<span class="pc o${p.owner}${show?'':' hid'}${selp?' selp':''}">${show?face(p.rank):''}${kills}</span>`;
@@ -1314,6 +1483,45 @@ function renderBoard(){
   el.innerHTML=h;
 }
 
+// A spectator sees both armies' ranks but gives no orders and sends no reactions.
+function renderWatchPanel(el){
+  const sides=[0,1].map(o=>`<div><span class="chip o${o}"></span>${who(o)}${S.phase==='setup'
+    ?(S.ready[o]?'<span class="ok">Ready</span>':'<span class="no">Deploying</span>')
+    :`<span class="ok">${alive(o).length} pieces</span>`}</div>`).join('');
+  let head;
+  if(S.phase==='setup')head=`<div class="eyebrow">Spectating · deployment</div>
+      <div class="timer${S.timeLeft<=15?' low':''}" id="timer">${fmt(S.timeLeft)}</div>
+      <p>Both sides are deploying. You see both formations; the players can't see each other's.</p>`;
+  else if(S.phase==='over')head=`<div class="turn win">${who(S.winner)} wins</div><div class="hint">${S.reason} All ranks and any unexploded mines are now shown.</div>`;
+  else head=`<div class="turn wait">${who(S.turn)} is moving…</div>
+      ${S.paused?`<div class="hint">${who(1)} lost their connection. The game is paused until they're back.</div>`:''}`;
+  const entries=S.log.slice(-80).reverse();
+  el.innerHTML=`
+    <div class="sec">
+      ${head}
+      <div class="ready-list">${sides}</div>
+      ${S.tc&&S.phase!=='setup'?`<div class="clocks">${[0,1].map(o=>`<div class="tc o${o}${S.phase==='play'&&S.turn===o?' on':''}${(tcLeft(o)??1)<=20000?' low':''}" data-clock="${o}"><span class="chip o${o}"></span><span class="nm">${who(o)}</span><b>${fmtClock(tcLeft(o))}</b></div>`).join('')}</div>`:''}
+      ${netLine()}
+      <p class="muted">You're watching with both sides' ranks shown. The players can't see each other's ranks, and spectators can't react or send messages during the game.</p>
+      <div class="row tight"><button class="btn" type="button" data-act="leave">Stop watching</button></div>
+    </div>
+    ${S.phase==='setup'?'':`<div class="sec">
+      <div class="eyebrow steel">Field log</div>
+      <ol class="log">${entries.map(e=>`<li class="k-${e.k||'n'}"><span class="n">T${e.n}</span><span class="t">${e.text}</span></li>`).join('')||'<li><span class="n"></span><span class="t">No action yet.</span></li>'}</ol>
+    </div>
+    <div class="sec">
+      <div class="eyebrow teal">Map key</div>
+      <div class="legend">
+        <div><span class="lg pu-on"></span>Glowing square: power-up, moves every turn</div>
+        <div><span class="lg"><span class="bag o0" style="inset:3px"></span></span>Barricade, blocks all pieces</div>
+        <div><span class="lg band"></span>Rows 4–7, mines hidden here</div>
+        <div><span class="lg"><span class="crater"></span></span>Exploded mine, now safe</div>
+        <div><span class="lg lastme"></span>${who(0)}'s last move</div>
+        <div><span class="lg lastfoe"></span>${who(1)}'s last move</div>
+      </div>
+    </div>`}`;
+}
+
 function pips(n,max){let s='<span class="pips">';for(let i=0;i<max;i++)s+=`<span class="pip${i<n?'':' used'}"></span>`;return s+'</span>'}
 
 function renderPanel(){
@@ -1322,6 +1530,7 @@ function renderPanel(){
     el.innerHTML=`<div class="sec"><div class="eyebrow">Sample position</div><p>Both armies are deployed on a 10×10 field. Your ranks are visible; the enemy's stay hidden until the battle ends. Open the menu to start a game.</p><button class="btn primary" data-act="menu" type="button">Start a game</button></div>`;
     return;
   }
+  if(S.spec)return renderWatchPanel(el);
   if(S.phase==='setup'){
     const counts={};ARMY.forEach(r=>counts[r]=(counts[r]||0)+1);
     const roster=[13,12,11,10,9,8,7,6,5,4,3,2,1,14,0].map(r=>`<span><b>${counts[r]>1?counts[r]+'× ':''}${SHORT[r]}</b>${NAMES[r]}</span>`).join('');
@@ -1429,6 +1638,7 @@ const RULES=`<details class="rules"${'%OPEN%'}><summary>Rules of engagement</sum
   <li><b>Time control</b> (optional): each player has 3, 5 or 10 minutes, plus 3 seconds after every move. Only the side to move loses time; run out and you lose.</li>
   <li><b>Pre-moves</b>: against the computer or online, you can queue your next move during the enemy's turn. It plays the moment your turn starts if it's still possible. Turn it off in your orders panel.</li>
   <li><b>React</b>: send an emoji or a short taunt. Your opponent can hide reactions.</li>
+  <li><b>Chat</b> (online): type messages to your opponent in the Chat box. Spectators can't read or send them. Either player can hide the other's messages.</li>
   <li><b>Land mines</b> (2): hidden between rows 4 and 7 and never move. A piece that steps on one is destroyed. A barricade built on one sets it off and loses that square.</li>
 </ul></details>`;
 
@@ -1441,7 +1651,7 @@ function showMenu(){
     <div class="eyebrow steel">Online</div>
     <div class="modes">
       <button class="btn mode primary" type="button" data-act="host" data-focus ${online?'':'disabled'}><b>Create online game</b><span>Get a room code and invite a friend.</span></button>
-      <button class="btn mode online" type="button" data-act="join" ${online?'':'disabled'}><b>Join online game</b><span>Enter your friend's room code.</span></button>
+      <button class="btn mode online" type="button" data-act="join" ${online?'':'disabled'}><b>Join or watch online</b><span>Enter a room code to play, or to watch a game in progress.</span></button>
     </div>
     ${online?'':'<p>You are offline. Online games need an internet connection; the modes below work offline.</p>'}
     <div class="eyebrow">Offline</div>
@@ -1464,6 +1674,14 @@ function showHandoff(p,kind){
 }
 function showOver(){
   if(S.phase!=='over')return;
+  if(S.spec){
+    overlay(`<div class="eyebrow">Battle over · turn ${S.moves+1}</div>
+      <div class="big-side"><span class="chip o${S.winner}"></span><h2 class="win">${who(S.winner)} wins</h2></div>
+      <p>${S.reason}</p>
+      <p>Every rank and any unexploded mine is now shown on the board. If they play a rematch, you keep watching.</p>
+      <div class="row"><button class="btn primary" type="button" data-act="review" data-focus>Review the board</button><button class="btn" type="button" data-act="leave">Stop watching</button></div>`,false,'over');
+    return;
+  }
   const title=S.mode==='local'?`${who(S.winner)} wins`:(S.winner===meSide()?'Victory':'Defeat');
   const on=S.mode==='online';
   overlay(`<div class="eyebrow">Battle over · turn ${S.moves+1}</div>
@@ -1494,7 +1712,7 @@ function askSurrender(){
    connection is down. The host's clock is the official one online; the guest only displays it. */
 const TC_INC=3000;
 function makeClock(minutes){return minutes>0?{base:minutes*60000,inc:TC_INC,left:[minutes*60000,minutes*60000],since:null}:null}
-function tcPaused(){return S.phase!=='play'||!!S.handoff||(S.mode==='online'&&!netUp())}
+function tcPaused(){return S.phase!=='play'||!!S.handoff||(S.mode==='online'&&(!netUp()||S.paused))}
 function tcLeft(o){
   const c=S.tc;if(!c)return null;
   let l=c.left[o];
@@ -1513,8 +1731,8 @@ function tcTick(){
     el.classList.toggle('low',ms<=20000);
     el.classList.toggle('on',S.phase==='play'&&S.turn===o);
   });
-  // The guest never decides a timeout; the host's clock does and sends the result.
-  if(S.phase==='play'&&!(S.mode==='online'&&NET.role==='guest')&&S.tc.since&&tcLeft(S.turn)<=0){
+  // The guest and spectators never decide a timeout; the host's clock does and sends the result.
+  if(S.phase==='play'&&!(S.mode==='online'&&NET.role!=='host')&&S.tc.since&&tcLeft(S.turn)<=0){
     const t=S.turn;tcBank();
     finish(1-t,`${who(t)} ran out of time.`);
   }
@@ -1525,7 +1743,7 @@ setInterval(tcTick,250);
 function prefOn(name,dflt){try{const v=localStorage.getItem('gow-'+name);return v==null?dflt:v==='1'}catch(e){return dflt}}
 function setPref(name,on){try{localStorage.setItem('gow-'+name,on?'1':'0')}catch(e){}}
 function canPremove(){
-  return S.phase==='play'&&(S.mode==='ai'||S.mode==='online')&&S.turn!==meSide()&&prefOn('premove',true)
+  return S.phase==='play'&&!S.spec&&(S.mode==='ai'||S.mode==='online')&&S.turn!==meSide()&&prefOn('premove',true)
     &&!(S.mode==='online'&&!netUp());
 }
 function premoveClick(x,y){
@@ -1557,25 +1775,30 @@ const EMO={open:false,lastSent:0,lastIn:0};
 const isWords=e=>!/\p{Extended_Pictographic}/u.test(e); // "GG" is text, "😂" is an emoji
 function showEmote(o,i){
   if(!Number.isInteger(i)||i<0||i>=EMOTES.length)return;
+  showBubble(o,EMOTES[i],isWords(EMOTES[i])?' words':'',3200);
+}
+// A bubble over the board; the text is always set as plain text.
+function showBubble(o,text,cls,ms){
   const wrap=$('#boardWrap');if(!wrap)return;
   const mine=o===viewer();
   const el=document.createElement('div');
-  el.className=`bubble ${mine?'mine':'theirs'} o${o}${isWords(EMOTES[i])?' words':''}`;
+  el.className=`bubble ${mine?'mine':'theirs'} o${o}${cls}`;
   el.innerHTML=`<span class="who"></span><span class="emo"></span>`;
   el.querySelector('.who').textContent=who(o);
-  el.querySelector('.emo').textContent=EMOTES[i];
+  el.querySelector('.emo').textContent=text;
+  if(el.style&&el.style.setProperty)el.style.setProperty('--out',(ms-400)/1000+'s');
   wrap.querySelectorAll(`.bubble.${mine?'mine':'theirs'}`).forEach(b=>b.remove());
   wrap.appendChild(el);
   snd('select');
-  setTimeout(()=>el.remove(),3200);
+  setTimeout(()=>el.remove(),ms);
 }
 function sendEmote(i){
   const now=Date.now();
-  if(now-EMO.lastSent<1500)return;
+  if(S.spec||now-EMO.lastSent<1500)return;
   EMO.lastSent=now;EMO.open=false;
   const me=meSide();
   showEmote(me,i);renderPanel();
-  if(S.mode==='online')send({type:'emote',i});
+  if(S.mode==='online'){send({type:'emote',i});if(NET.role==='host')toWatchers({type:'emote',i,o:0})}
   if(S.mode==='ai'&&Math.random()<.4)setTimeout(()=>aiEmote(['😂','😎','Is that all?','🤝','GG'][rnd(5)]),1200+rnd(800));
 }
 function receiveEmote(o,i){
@@ -1594,6 +1817,76 @@ function aiReact(out,A){
   else if(aiLost&&Math.random()<.22)setTimeout(()=>aiEmote(['😤','😡','😱','Nice move!'][rnd(4)]),900);
 }
 
+/* ---------- chat: online players only. Never sent to spectators, who can see every rank. ---------- */
+const CHAT_MAX=200;
+const CHAT={msgs:[],lastSent:0,lastIn:0,built:false};
+function cleanChat(s){return String(s??'').replace(/[\u0000-\u001f\u007f]/g,' ').replace(/\s+/g,' ').trim().slice(0,CHAT_MAX)}
+function chatOn(){return S.mode==='online'&&!S.spec&&S.phase!=='menu'}
+function buildChat(){
+  const box=$('#chat');
+  box.innerHTML=`<div class="eyebrow steel">Chat</div>
+    <ol class="chatlog" id="chatLog" aria-live="polite"></ol>
+    <form class="chatform" id="chatForm" autocomplete="off">
+      <input id="chatInput" maxlength="${CHAT_MAX}" placeholder="Message your opponent" aria-label="Chat message">
+      <button class="btn primary" type="submit">Send</button>
+    </form>
+    <label class="toggle"><input type="checkbox" id="chatShow" ${prefOn('chat',true)?'checked':''}> Show my opponent's messages</label>`;
+  $('#chatForm').addEventListener('submit',e=>{e.preventDefault();sendChat()});
+  $('#chatShow').addEventListener('change',e=>{setPref('chat',e.target.checked);renderChatLog()});
+  CHAT.built=true;
+}
+// Called on every render: only shows/hides the box and enables the input, so typing is never interrupted.
+function renderChatBox(){
+  const box=$('#chat');
+  box.hidden=!chatOn();
+  if(box.hidden)return;
+  if(!CHAT.built){buildChat();renderChatLog()}
+  const inp=$('#chatInput');inp.disabled=!netUp();
+  inp.placeholder=netUp()?`Message ${who(1-S.me)}`:'Disconnected';
+}
+function renderChatLog(){
+  const list=$('#chatLog');if(!list||!list.appendChild)return;
+  const show=prefOn('chat',true);
+  const msgs=CHAT.msgs.filter(m=>show||m.o===S.me);
+  list.innerHTML='';
+  const line=(cls,text)=>{const li=document.createElement('li');li.className=cls;li.textContent=text;list.appendChild(li)};
+  if(!msgs.length)line('note',"No messages yet. Only your opponent sees them; spectators don't.");
+  for(const m of msgs){
+    const li=document.createElement('li');
+    li.innerHTML=`<span class="chip o${m.o}"></span><b></b><span></span>`;
+    li.querySelector('b').textContent=m.o===S.me?'You':who(m.o);
+    li.querySelector('span:last-child').textContent=m.text;
+    list.appendChild(li);
+  }
+  if(!show&&CHAT.msgs.some(m=>m.o!==S.me))line('note',"Your opponent's messages are hidden.");
+  list.scrollTop=list.scrollHeight;
+}
+function addChat(o,text){
+  CHAT.msgs.push({o,text});
+  if(CHAT.msgs.length>100)CHAT.msgs.shift();
+  renderChatLog();
+}
+function sendChat(){
+  const inp=$('#chatInput'),text=cleanChat(inp&&inp.value);
+  if(!text||!chatOn()||!netUp())return;
+  const now=Date.now();
+  if(now-CHAT.lastSent<600)return;
+  CHAT.lastSent=now;
+  send({type:'chat',text});
+  addChat(S.me,text);
+  inp.value='';
+}
+function receiveChat(o,raw){
+  const text=cleanChat(raw);
+  if(!text||!chatOn())return;
+  const now=Date.now();
+  if(now-CHAT.lastIn<250)return; // drop floods
+  CHAT.lastIn=now;
+  addChat(o,text);
+  if(prefOn('chat',true))showBubble(o,text,' chatb',Math.min(8000,3000+text.length*45));
+}
+function clearChat(){CHAT.msgs=[];const i=$('#chatInput');if(i&&'value'in i)i.value='';renderChatLog()}
+
 /* ---------- player names, asked before every game ---------- */
 // mode: 'ai' (you vs the computer), 'local' (two names), 'host' (your name, then a room opens).
 function showNames(mode){
@@ -1608,7 +1901,7 @@ function showNames(mode){
       ${fields.map(([i,label,val],k)=>`<label class="namefield"><span class="nlabel"><span class="chip o${i}"></span>${label}</span>
         <input name="n${i}" maxlength="${NAME_MAX}" spellcheck="false" value="${cleanName(val)}" placeholder="${SIDE[i]}" ${k===0?'data-focus':''}></label>`).join('')}
       ${mode==='ai'?`<fieldset class="levels"><legend>Computer difficulty</legend>
-        ${[['easy','Easy','Plays by simple habits'],['normal','Normal','Reads the battle, makes some mistakes'],['hard','Hard','Tracks every clue, plays sharp']]
+        ${[['easy','Easy','Plays by simple habits'],['normal','Normal','Reads the battle, makes some mistakes'],['hard','Hard','Tracks every clue, plays sharp'],['expert','Expert','Looks ahead, hides its flag, plans barricades']]
           .map(([v,t,d])=>`<label class="level"><input type="radio" name="level" value="${v}" ${(saved.level||'normal')===v?'checked':''}><b>${t}</b><span>${d}</span></label>`).join('')}
       </fieldset>`:''}
       <fieldset class="levels tcs"><legend>Time control · each player's clock runs only on their turn, +3 s per move</legend>
@@ -1630,7 +1923,7 @@ function submitNames(form){
   }
   if(n0!==SIDE[0])rememberNames({me:n0});
   if(mode==='ai'){
-    const level=['easy','normal','hard'].includes(el.level&&el.level.value)?el.level.value:'normal';
+    const level=['easy','normal','hard','expert'].includes(el.level&&el.level.value)?el.level.value:'normal';
     rememberNames({level});
     return newGame('ai',[n0,'Computer'],level,tc);
   }
@@ -1666,7 +1959,8 @@ function act(a){
       break;
     case'host':showNames('host');break;
     case'join':showJoin('','');break;
-    case'rejoin':joinGame(NET.lastCode,NET.myName);break;
+    case'rejoin':joinGame(NET.lastCode,NET.myName,NET.lastWatch);break;
+    case'watch':{const c=$('#joinCode'),n=$('#joinName');joinGame(c?c.value:NET.lastCode,n?n.value:NET.myName,true);break}
     case'leave':leaveOnline();break;
     case'copy':copyText(NET.code,'Room code copied.');break;
     case'share':shareInvite();break;
@@ -1735,7 +2029,7 @@ function playClick(x,y){
 }
 
 $('#board').addEventListener('click',e=>{
-  const b=e.target.closest('.sq');if(!b)return;
+  const b=e.target.closest('.sq');if(!b||S.spec)return;
   const x=+b.dataset.x,y=+b.dataset.y;
   if(S.phase==='setup'&&!S.handoff)setupClick(x,y);
   else if(S.phase==='play')playClick(x,y);
@@ -1801,14 +2095,17 @@ function commit(a){
 
 /* ---------- online play ----------
    Phones connect directly (WebRTC through PeerJS's free broker). The host (Ivory) runs the real game and
-   sends the guest (Onyx) only what Onyx may see: enemy ranks and mine positions never leave the host. */
+   sends the guest (Onyx) only what Onyx may see: enemy ranks and mine positions never leave the host.
+   Spectators connect to the same room and get a view with no ranks at all until the battle ends. */
 const PEER_SRC='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
 const ID_PREFIX='game-of-war-';
 const CODE_CHARS='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-const NET={role:null,code:null,lastCode:null,myName:'',guestName:'',tc:0};
-let peer=null,conn=null,lastSent='';
+const WATCH_MAX=8;
+const NET={role:null,code:null,lastCode:null,lastWatch:false,myName:'',guestName:'',tc:0}; // role: host | guest | watch
+let peer=null,conn=null,lastSent='',watchers=[],lastWatchSent=''; // watchers: the host's spectator links, [{c,name}]
 function netUp(){return!!(conn&&conn.open)}
 function send(m){if(netUp())try{conn.send(m)}catch(e){}}
+function toWatchers(m){watchers.forEach(w=>{if(w.c.open)try{w.c.send(m)}catch(e){}})}
 function makeCode(){let s='';for(let i=0;i<6;i++)s+=CODE_CHARS[rnd(CODE_CHARS.length)];return s}
 function peerId(code){return ID_PREFIX+code.toLowerCase()}
 function loadPeer(){
@@ -1816,7 +2113,8 @@ function loadPeer(){
   return new Promise((res,rej)=>{const s=document.createElement('script');s.src=PEER_SRC;s.onload=res;s.onerror=rej;document.head.appendChild(s)});
 }
 function netClose(){
-  const c=conn,p=peer;conn=null;peer=null;NET.role=null;NET.code=null;lastSent='';
+  const c=conn,p=peer,ws=watchers;conn=null;peer=null;watchers=[];NET.role=null;NET.code=null;lastSent='';lastWatchSent='';
+  ws.forEach(w=>{try{w.c.close()}catch(e){}});
   try{c&&c.close()}catch(e){}
   try{p&&p.destroy()}catch(e){}
 }
@@ -1828,7 +2126,9 @@ function netErrorText(e){
 }
 function netLine(){
   if(S.mode!=='online')return'';
-  return`<div class="netline"><span class="dot ${netUp()?'on':'off'}"></span>Online as ${who(S.me)}${NET.code?` · room ${NET.code}`:''}${netUp()?'':' · disconnected'}</div>`;
+  const names=NET.role==='host'?watchers.map(w=>w.name):(S.watching||[]);
+  const eye=names.length?` · <span title="${names.join(', ')}">👁 ${names.length} watching</span>`:'';
+  return`<div class="netline"><span class="dot ${netUp()?'on':'off'}"></span><span>${S.spec?'Spectating':`Online as ${who(S.me)}`}${NET.code?` · room ${NET.code}`:''}${netUp()?'':' · disconnected'}${eye}</span></div>`;
 }
 function inviteUrl(code){return location.origin+location.pathname+'?join='+code}
 function copyText(text,done){
@@ -1842,25 +2142,48 @@ function shareInvite(){
   else copyText(url,'Invite link copied. Send it to your friend.');
 }
 
-// What one side is allowed to know.
+// What one side is allowed to know. o = -1 is a spectator: every rank and kill count on both sides,
+// but no mine positions or private reports until the battle ends.
 function viewFor(o){
-  const over=S.phase==='over';
-  const pieces=S.pieces.filter(p=>p.alive&&(p.owner===o||S.phase!=='setup'))
-    .map(p=>p.owner===o||over?{...p}:{...p,rank:null,kills:0});
+  const over=S.phase==='over',spec=o<0;
+  const pieces=S.pieces.filter(p=>p.alive&&(p.owner===o||spec||S.phase!=='setup'))
+    .map(p=>p.owner===o||spec||over?{...p}:{...p,rank:null,kills:0});
   const v={mode:'online',me:o,phase:S.phase,turn:S.turn,moves:S.moves,winner:S.winner,reason:S.reason,
     names:S.names,pieces,bars:S.bars,
     tc:S.tc?{base:S.tc.base,inc:S.tc.inc,left:[tcLeft(0),tcLeft(1)],run:S.tc.since?S.turn:-1}:null,mines:over?S.mines:[],craters:S.craters,powerups:S.powerups,skills:S.skills,
     barUsed:S.barUsed,last:S.last,flagPending:S.flagPending,ready:S.ready,timeLeft:S.timeLeft,
-    log:S.log.filter(e=>e.vis==='all'||e.vis===o),fallen:o===0?[S.fallen[0],[]]:[[],S.fallen[1]],
-    fx:S.fx,sfx:S.sfx,puFresh:S.puFresh,toasts:S.pending[o]};
+    log:S.log.filter(e=>e.vis==='all'||e.vis===o),fallen:spec?[[],[]]:o===0?[S.fallen[0],[]]:[[],S.fallen[1]],
+    fx:S.fx,sfx:S.sfx,puFresh:S.puFresh,toasts:spec?[]:S.pending[o],
+    watching:watchers.map(w=>w.name),paused:spec&&!netUp()};
   return v;
 }
 function sync(force){
-  if(!S||S.mode!=='online'||NET.role!=='host'||!netUp())return;
-  const v=viewFor(1),s=JSON.stringify(v);
-  if(!force&&s===lastSent)return;
-  lastSent=s;S.pending[1]=[];
-  send({type:'state',v});
+  if(!S||S.mode!=='online'||NET.role!=='host')return;
+  if(netUp()){
+    const v=viewFor(1),s=JSON.stringify(v);
+    if(force||s!==lastSent){lastSent=s;S.pending[1]=[];send({type:'state',v})}
+  }
+  if(watchers.length){
+    const v=viewFor(-1),s=JSON.stringify(v);
+    if(force||s!==lastWatchSent){lastWatchSent=s;toWatchers({type:'state',v})}
+  }
+}
+function addWatcher(c){
+  const name=cleanName(c.metadata&&c.metadata.name)||'A spectator';
+  c.on('open',()=>{
+    if(NET.role!=='host'){try{c.close()}catch(e){}return}
+    if(watchers.length>=WATCH_MAX){try{c.send({type:'full',watch:true})}catch(e){}setTimeout(()=>c.close(),500);return}
+    watchers.push({c,name});
+    toast(`${name} is watching.`,'info');
+    if(S.mode==='online')renderPanel();
+    sync(true); // before the game starts there is nothing to send; they get the board when it does
+  });
+  const drop=()=>{
+    const i=watchers.findIndex(w=>w.c===c);if(i<0)return;
+    watchers.splice(i,1);
+    if(S.mode==='online'){renderPanel();sync()}
+  };
+  c.on('close',drop);c.on('error',drop);
 }
 function sendArrange(){send({type:'arrange',pos:alive(S.me).map(p=>({id:p.id,x:p.x,y:p.y}))})}
 
@@ -1881,7 +2204,7 @@ function lobbyHtml(msg){
     <div class="row"><button class="btn" type="button" data-act="leave">Cancel</button></div>`;
 }
 async function hostGame(){
-  netClose();NET.guestName='';
+  netClose();NET.guestName='';clearChat();
   overlay(lobbyHtml('Opening a room…'),false,'lobby');
   try{await loadPeer()}catch(e){return overlay(lobbyHtml('Could not reach the online service. Check your internet connection and try again.'),false,'lobby')}
   const code=makeCode(),p=new window.Peer(peerId(code),{debug:0});
@@ -1889,6 +2212,7 @@ async function hostGame(){
   p.on('open',()=>{if(peer!==p)return;NET.role='host';NET.code=code;NET.lastCode=code;overlay(lobbyHtml('Waiting for your friend to join…'),false,'lobby')});
   p.on('connection',c=>{
     if(peer!==p)return;
+    if(c.metadata&&c.metadata.watch)return addWatcher(c);
     if(netUp()){c.on('open',()=>{try{c.send({type:'full'})}catch(e){}setTimeout(()=>c.close(),500)});return}
     attach(c);
   });
@@ -1903,31 +2227,35 @@ async function hostGame(){
 
 function showJoin(code,msg,busy){
   const name=cleanName(NET.myName||savedNames().me||'');
-  overlay(`<div class="eyebrow">Online · join</div><h2>Join a game</h2>
-    <p>Enter your name and the 6-character room code from your friend.</p>
+  overlay(`<div class="eyebrow">Online · join or watch</div><h2>Join a game</h2>
+    <p>Enter your name and the 6-character room code. <b>Join</b> to play Onyx, or <b>Watch</b> to follow a game as a spectator.</p>
     <form class="join" id="joinForm" autocomplete="off">
-      <label class="namefield joinname"><span class="nlabel"><span class="chip o1"></span>Your name · you play Onyx</span>
+      <label class="namefield joinname"><span class="nlabel"><span class="chip o1"></span>Your name</span>
         <input id="joinName" name="joinName" maxlength="${NAME_MAX}" spellcheck="false" placeholder="${SIDE[1]}" value="${name}" ${busy?'disabled':''}></label>
       <input id="joinCode" name="joinCode" maxlength="6" inputmode="text" autocapitalize="characters" spellcheck="false" placeholder="CODE" value="${(code||'').replace(/[^A-Z0-9]/gi,'')}" aria-label="Room code" ${busy?'disabled':''}>
       <button class="btn primary" type="submit" ${busy?'disabled':''}>Join</button>
+      <button class="btn" type="button" data-act="watch" ${busy?'disabled':''}><span aria-hidden="true">👁</span> Watch</button>
     </form>
     <p class="netmsg">${msg||''}</p>
     <div class="row"><button class="btn" type="button" data-act="leave">Back</button></div>`,false,'join');
   if(!busy){const i=$(name&&!code?'#joinCode':'#joinName');if(i)i.focus()}
 }
-async function joinGame(raw,rawName){
+async function joinGame(raw,rawName,watch){
   const code=String(raw||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
   NET.myName=cleanName(rawName);
   if(NET.myName)rememberNames({me:NET.myName});
   if(code.length!==6)return showJoin(code,'Enter the 6-character room code.');
   netClose();
-  NET.lastCode=code;
-  showJoin(code,'Connecting…',true);
+  if(code!==NET.lastCode||!!watch!==NET.lastWatch)clearChat(); // reconnecting to the same game keeps the conversation
+  NET.lastCode=code;NET.lastWatch=!!watch;
+  showJoin(code,watch?'Connecting to watch…':'Connecting…',true);
   try{await loadPeer()}catch(e){return showJoin(code,'Could not reach the online service. Check your internet connection and try again.')}
   const p=new window.Peer({debug:0});
-  peer=p;NET.role='guest';NET.code=code;
-  const timer=setTimeout(()=>{if(peer===p&&!netUp()){netClose();showJoin(code,'No answer from that room. Check the code, and make sure your friend still has the invite screen open.')}},20000);
-  p.on('open',()=>{if(peer!==p)return;attach(p.connect(peerId(code),{reliable:true,serialization:'json'}),()=>clearTimeout(timer))});
+  peer=p;NET.role=watch?'watch':'guest';NET.code=code;
+  const timer=setTimeout(()=>{if(peer===p&&!netUp()){netClose();showJoin(code,watch?'No answer from that room. Check the code, and make sure the host still has the game open.':'No answer from that room. Check the code, and make sure your friend still has the invite screen open.')}},20000);
+  const opts={reliable:true,serialization:'json'};
+  if(watch)opts.metadata={watch:true,name:NET.myName};
+  p.on('open',()=>{if(peer!==p)return;attach(p.connect(peerId(code),opts),()=>clearTimeout(timer))});
   p.on('disconnected',()=>{if(peer===p&&!p.destroyed)try{p.reconnect()}catch(e){}});
   p.on('error',e=>{
     if(peer!==p||netUp())return;
@@ -1941,15 +2269,17 @@ function onConnected(){
   if(NET.role==='host'){
     if(S.mode==='online'&&(S.phase==='setup'||S.phase==='play')){closeNetOverlay();toast(`${who(1)} reconnected.`,'good');render();sync(true)}
     else newOnlineGame();
+  }else if(NET.role==='watch'){
+    if(!(S.mode==='online'&&S.spec))showJoin(NET.code,'Connected. The board appears as soon as the battle starts.',true);
   }else{
     send({type:'hello',name:NET.myName});
     if(!(S.mode==='online'&&S.phase!=='menu'))showJoin(NET.code,'Connected. Waiting for the host to start…',true);
   }
 }
 function onClosed(){
-  if(S.mode!=='online'){if(NET.role==='guest'){netClose();showJoin(NET.lastCode,'The connection closed before the game started. Try again.')}return}
+  if(S.mode!=='online'){if(NET.role==='guest'||NET.role==='watch'){netClose();showJoin(NET.lastCode,'The connection closed before the game started. Try again.')}return}
   render();
-  if(S.phase==='over'){toast('Your opponent left the game.','info');return}
+  if(S.phase==='over'){toast(S.spec?'The host left the game.':'Your opponent left the game.','info');return}
   if(NET.role==='host'){
     overlay(`<div class="eyebrow">Connection lost</div><h2>${who(1)} disconnected</h2>
       <p>The game is paused. Your friend can rejoin with room code <b class="code-inline">${NET.code}</b> or the same invite link.</p>
@@ -1968,7 +2298,8 @@ function onData(m){
     else if(m.type==='arrange')hostArrange(m.pos);
     else if(m.type==='ready'){if(S.phase==='setup'&&!S.ready[1])markReady(1)}
     else if(m.type==='surrender'){if(S.phase==='play')surrender(1)}
-    else if(m.type==='emote')receiveEmote(1,m.i);
+    else if(m.type==='emote'){if(Number.isInteger(m.i)&&m.i>=0&&m.i<EMOTES.length)toWatchers({type:'emote',i:m.i,o:1});receiveEmote(1,m.i)}
+    else if(m.type==='chat')receiveChat(1,m.text);
     else if(m.type==='rematch'){if(S.phase==='over'){toast(`${who(1)} started a rematch.`,'info');newOnlineGame()}}
     else if(m.type==='hello'){
       const name=cleanName(m.name);
@@ -1978,8 +2309,9 @@ function onData(m){
   }else{
     if(m.type==='state')guestState(m.v);
     else if(m.type==='tick'){if(S.mode==='online'&&S.phase==='setup'){S.timeLeft=m.t;tickClock()}}
-    else if(m.type==='full'){netClose();showJoin(NET.lastCode,'That game already has two players.')}
-    else if(m.type==='emote')receiveEmote(0,m.i);
+    else if(m.type==='full'){netClose();showJoin(NET.lastCode,m.watch?`That game already has ${WATCH_MAX} spectators, the most it allows.`:'That game already has two players. Tap Watch to follow it as a spectator.')}
+    else if(m.type==='emote')receiveEmote(m.o===1?1:0,m.i); // from the host; spectators also get Onyx's, marked o:1
+    else if(m.type==='chat'&&NET.role==='guest')receiveChat(0,m.text);
   }
 }
 function hostArrange(pos){
@@ -1992,6 +2324,7 @@ function hostArrange(pos){
     seen.add(key(q.x,q.y));
   }
   pos.forEach(q=>{const p=getPiece(q.id);p.x=q.x;p.y=q.y});
+  sync(); // spectators follow both deployments
 }
 function newOnlineGame(){
   if(S)clearInterval(S.timer);
@@ -2007,19 +2340,24 @@ function newOnlineGame(){
 function guestState(v){
   const prev=S;
   const wasOnline=prev&&prev.mode==='online';
+  const spec=NET.role==='watch';
   const next={...freshState('online'),...v,busy:false,timer:null};
+  if(spec){next.me=0;next.spec=true} // watch from Ivory's side of the table
   next.names=[0,1].map(i=>cleanName(v.names&&v.names[i])||SIDE[i]);
+  next.watching=(Array.isArray(v.watching)?v.watching:[]).map(cleanName).filter(Boolean);
   // The host's clock is official; count down locally from the time it reported.
   next.tc=v.tc&&Array.isArray(v.tc.left)?{base:+v.tc.base,inc:+v.tc.inc,left:v.tc.left.map(Number),since:v.tc.run>=0?Date.now():null}:null;
   // A queued pre-move survives state updates; it fires when the turn comes to us.
-  if(wasOnline&&prev.premove&&v.phase==='play')next.premove=prev.premove;
-  const myTurnNow=v.phase==='play'&&v.turn===next.me&&!(wasOnline&&prev.phase==='play'&&prev.turn===next.me);
+  if(!spec&&wasOnline&&prev.premove&&v.phase==='play')next.premove=prev.premove;
+  const myTurnNow=!spec&&v.phase==='play'&&v.turn===next.me&&!(wasOnline&&prev.phase==='play'&&prev.turn===next.me);
   if(wasOnline&&prev.phase===v.phase&&prev.turn===v.turn&&prev.moves===v.moves){next.selected=prev.selected;next.tool=prev.tool;next.preview=prev.preview}
-  if(wasOnline&&prev.phase==='setup'&&v.phase==='setup'){next.pieces=prev.pieces;next.ready=[v.ready[0],prev.ready[1]||v.ready[1]]}
+  if(!spec&&wasOnline&&prev.phase==='setup'&&v.phase==='setup'){next.pieces=prev.pieces;next.ready=[v.ready[0],prev.ready[1]||v.ready[1]]}
   S=next;
   closeNetOverlay();
   if(!wasOnline||prev.phase!==v.phase){
-    if(v.phase==='setup'){closeOverlay();toast('You play Onyx. Deploy your army; you share one 90-second clock.','info')}
+    if(spec&&v.phase==='setup'){closeOverlay();toast("You're watching. Both sides are deploying.",'info')}
+    else if(spec&&v.phase==='play'&&!wasOnline){closeOverlay();toast(`You're watching ${who(0)} vs ${who(1)}.`,'info')}
+    else if(v.phase==='setup'){closeOverlay();toast('You play Onyx. Deploy your army; you share one 90-second clock.','info')}
     else if(v.phase==='play'){closeOverlay();toast(`Battle begins. ${who(0)} moves first.`,'info')}
     else if(v.phase==='over')setTimeout(showOver,1000);
   }
@@ -2028,7 +2366,7 @@ function guestState(v){
   if(myTurnNow)schedulePremove();
 }
 function leaveOnline(){
-  netClose();
+  netClose();clearChat();
   if(S.mode!=='online'){showMenu();return}
   clearInterval(S.timer);
   S=freshState('ai');formation(0);formation(1);S.phase='menu';
